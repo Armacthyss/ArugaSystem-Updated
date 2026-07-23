@@ -1,0 +1,5 @@
+  
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Database=ArugaSystemDB;User Id=ArugaSystem;Password=adminaruga;TrustServerCertificate=True"
+  }
+  
