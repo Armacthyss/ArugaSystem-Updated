@@ -13,6 +13,7 @@ builder.WebHost.UseUrls(
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddScoped<VaccineRepository>();
 
 builder.Services.AddScoped<ParentRepository>();          // ← only once
 builder.Services.AddDbContext<AppDbContext>(options =>   // ← only once

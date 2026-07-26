@@ -1,35 +1,100 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using AndroidWebAPI.Data;
+using AndroidWebAPI.Models;
+using Microsoft.AspNetCore.Mvc;
 
-[ApiController]
-[Route("api/[controller]")]
-public class VaccinesController : ControllerBase
+namespace AndroidWebAPI.Controllers
 {
-    private readonly AppDbContext _context;
-    public VaccinesController(AppDbContext context) => _context = context;
-
-    // GET api/Vaccines/with-doses
-    [HttpGet("with-doses")]
-    public async Task<IActionResult> GetWithDoses()
+    [Route("api/[controller]")]
+    [ApiController]
+    public class VaccinesController : ControllerBase
     {
-        var vaccines = await _context.Vaccines.ToListAsync();
-        var doses    = await _context.VaccineDoses.ToListAsync();
+        private readonly VaccineRepository _repository;
 
-        var result = vaccines.Select(v => new
+        public VaccinesController(VaccineRepository repository)
         {
-            vaccineID   = v.VaccineID,
-            vaccineName = v.VaccineName,
-            doses       = doses
-                .Where(d => d.VaccineID == v.VaccineID)
-                .OrderBy(d => d.DoseNumber)
-                .Select(d => new {
-                    doseNumber      = d.DoseNumber,
-                    minIntervalDays = d.MinIntervalDays
-                })
-                .ToList()
-        });
+            _repository = repository;
+        }
 
-        return Ok(result);
+        // ===========================================
+        // GET ALL
+        // GET: api/Vaccines
+        // ===========================================
+        [HttpGet]
+        public async Task<IActionResult> GetAll()
+        {
+            var vaccines = await _repository.GetAllAsync();
+            return Ok(vaccines);
+        }
+
+        // ===========================================
+        // GET BY ID
+        // GET: api/Vaccines/{id}
+        // ===========================================
+        [HttpGet("{id}")]
+        public async Task<IActionResult> Get(int id)
+        {
+            var vaccine = await _repository.GetByIdAsync(id);
+
+            if (vaccine == null)
+                return NotFound();
+
+            return Ok(vaccine);
+        }
+
+        // ===========================================
+        // CREATE
+        // POST: api/Vaccines
+        // ===========================================
+        [HttpPost]
+        public async Task<IActionResult> Create([FromBody] Vaccine vaccine)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var created = await _repository.CreateAsync(vaccine);
+
+            return CreatedAtAction(
+                nameof(Get),
+                new { id = created.VaccineID },
+                created);
+        }
+
+        // ===========================================
+        // UPDATE
+        // PUT: api/Vaccines/{id}
+        // ===========================================
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Update(int id, [FromBody] Vaccine vaccine)
+        {
+            if (id != vaccine.VaccineID)
+                return BadRequest("ID mismatch.");
+
+            var existing = await _repository.GetByIdAsync(id);
+
+            if (existing == null)
+                return NotFound();
+
+            var updated = await _repository.UpdateAsync(vaccine);
+
+            return Ok(updated);
+        }
+
+        // ===========================================
+        // DELETE
+        // DELETE: api/Vaccines/{id}
+        // ===========================================
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var success = await _repository.DeleteAsync(id);
+
+            if (!success)
+                return NotFound();
+
+            return Ok(new
+            {
+                message = "Vaccine deleted successfully."
+            });
+        }
     }
 }
