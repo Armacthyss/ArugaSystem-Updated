@@ -1,7 +1,11 @@
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import axios from "axios"
+import { ref, computed, reactive, onMounted } from "vue"
 
-/* ----------------------------- Sidebar state ------------------------------ */
+/* ------------------------------- API config ------------------------------- */
+const api = "http://localhost:57147/api/Vaccines"
+
+/* --------------------------------- Sidebar --------------------------------- */
 const isCollapsed = ref(false)
 const toggleSidebar = () => (isCollapsed.value = !isCollapsed.value)
 
@@ -20,108 +24,52 @@ const activeNav = ref('Vaccine Management')
 
 /* -------------------------------- Status meta -------------------------------- */
 const statusMeta = {
-  Active: { tint: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-  Inactive: { tint: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400' },
+  true: { tint: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'Active' },
+  false: { tint: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400', label: 'Inactive' },
 }
+const getStatusMeta = (status) => statusMeta[String(!!status)]
 
 const ageCategoryOptions = ['Birth', '6 Weeks', '10 Weeks', '14 Weeks', '9 Months', '12 Months', 'Booster']
 const infantCategories = ['6 Weeks', '10 Weeks', '14 Weeks', '9 Months', '12 Months']
 
-/* -------------------------------- Vaccine data -------------------------------- */
-const vaccines = ref([
-  {
-    id: 1, name: 'Bacillus Calmette–Guérin', abbreviation: 'BCG', code: 'VX-001',
-    description: 'Protects against severe forms of tuberculosis in children.',
-    targetDisease: 'Tuberculosis', recommendedAge: 'At birth', ageCategory: 'Birth',
-    route: 'Intradermal', doses: 1, interval: 'Single dose', status: 'Active',
-    created: 'Jan 10, 2024', updated: 'Jun 02, 2026',
-  },
-  {
-    id: 2, name: 'Hepatitis B Vaccine', abbreviation: 'HepB', code: 'VX-002',
-    description: 'Prevents Hepatitis B virus infection, given within 24 hours of birth.',
-    targetDisease: 'Hepatitis B', recommendedAge: 'At birth', ageCategory: 'Birth',
-    route: 'Intramuscular', doses: 1, interval: 'Single dose', status: 'Active',
-    created: 'Jan 10, 2024', updated: 'Jun 02, 2026',
-  },
-  {
-    id: 3, name: 'Pentavalent Vaccine', abbreviation: 'Penta', code: 'VX-003',
-    description: 'Combination vaccine against Diphtheria, Pertussis, Tetanus, Hepatitis B, and Hib.',
-    targetDisease: 'DPT-HepB-Hib', recommendedAge: '6, 10, 14 weeks', ageCategory: '6 Weeks',
-    route: 'Intramuscular', doses: 3, interval: '4 weeks apart', status: 'Active',
-    created: 'Jan 12, 2024', updated: 'May 20, 2026',
-  },
-  {
-    id: 4, name: 'Oral Polio Vaccine', abbreviation: 'OPV', code: 'VX-004',
-    description: 'Protects against poliomyelitis through oral administration.',
-    targetDisease: 'Poliomyelitis', recommendedAge: '6, 10, 14 weeks', ageCategory: '6 Weeks',
-    route: 'Oral', doses: 3, interval: '4 weeks apart', status: 'Active',
-    created: 'Jan 12, 2024', updated: 'Apr 15, 2026',
-  },
-  {
-    id: 5, name: 'Inactivated Polio Vaccine', abbreviation: 'IPV', code: 'VX-005',
-    description: 'Injectable polio vaccine given alongside OPV doses for added protection.',
-    targetDisease: 'Poliomyelitis', recommendedAge: '14 weeks', ageCategory: '14 Weeks',
-    route: 'Intramuscular', doses: 1, interval: 'Single dose', status: 'Active',
-    created: 'Feb 01, 2024', updated: 'Mar 11, 2026',
-  },
-  {
-    id: 6, name: 'Pneumococcal Conjugate Vaccine', abbreviation: 'PCV', code: 'VX-006',
-    description: 'Protects against pneumococcal disease including pneumonia and meningitis.',
-    targetDisease: 'Pneumococcal Disease', recommendedAge: '6, 10, 14 weeks', ageCategory: '6 Weeks',
-    route: 'Intramuscular', doses: 3, interval: '4 weeks apart', status: 'Active',
-    created: 'Feb 01, 2024', updated: 'Jun 20, 2026',
-  },
-  {
-    id: 7, name: 'Measles, Mumps, Rubella Vaccine', abbreviation: 'MMR', code: 'VX-007',
-    description: 'Protects against measles, mumps, and rubella infections.',
-    targetDisease: 'Measles, Mumps, Rubella', recommendedAge: '9 months', ageCategory: '9 Months',
-    route: 'Subcutaneous', doses: 1, interval: 'Single dose', status: 'Active',
-    created: 'Mar 05, 2024', updated: 'Jun 09, 2026',
-  },
-  {
-    id: 8, name: 'MMR Booster Dose', abbreviation: 'MMR-2', code: 'VX-008',
-    description: 'Second dose of MMR given to reinforce immunity at 12 months.',
-    targetDisease: 'Measles, Mumps, Rubella', recommendedAge: '12 months', ageCategory: '12 Months',
-    route: 'Subcutaneous', doses: 1, interval: 'Single dose', status: 'Active',
-    created: 'Mar 05, 2024', updated: 'Jun 09, 2026',
-  },
-  {
-    id: 9, name: 'Diphtheria-Pertussis-Tetanus Booster', abbreviation: 'DPT Booster', code: 'VX-009',
-    description: 'Booster dose reinforcing protection against diphtheria, pertussis, and tetanus.',
-    targetDisease: 'Diphtheria, Pertussis, Tetanus', recommendedAge: '18 months (Booster)', ageCategory: 'Booster',
-    route: 'Intramuscular', doses: 1, interval: 'Single dose', status: 'Active',
-    created: 'Apr 18, 2024', updated: 'Feb 27, 2026',
-  },
-  {
-    id: 10, name: 'Japanese Encephalitis Vaccine', abbreviation: 'JE', code: 'VX-010',
-    description: 'Protects against Japanese encephalitis in endemic areas.',
-    targetDisease: 'Japanese Encephalitis', recommendedAge: '9 months', ageCategory: '9 Months',
-    route: 'Intramuscular', doses: 1, interval: 'Single dose', status: 'Inactive',
-    created: 'May 22, 2024', updated: 'Jan 30, 2026',
-  },
-])
+const routeOptions = ['Intramuscular', 'Intradermal', 'Subcutaneous', 'Oral']
+
+/* -------------------------------- Vaccine data (API) -------------------------------- */
+const vaccines = ref([])
+
+async function load() {
+  const res = await axios.get(api)
+  vaccines.value = res.data
+}
+
+onMounted(load)
 
 /* ---------------------------- Toolbar / filters ---------------------------- */
-const searchQuery = ref('')
-const statusFilter = ref('All')
-const ageCategoryFilter = ref('All')
+const search = ref("")
+const statusFilter = ref("All")
+const ageCategoryFilter = ref("All")
 
-const filteredVaccines = computed(() =>
-  vaccines.value.filter((v) => {
-    const q = searchQuery.value.trim().toLowerCase()
+const filteredVaccines = computed(() => {
+  return vaccines.value.filter((v) => {
+    const q = search.value.trim().toLowerCase()
     const matchesSearch =
-      !q || v.name.toLowerCase().includes(q) || v.code.toLowerCase().includes(q) || v.abbreviation.toLowerCase().includes(q)
-    const matchesStatus = statusFilter.value === 'All' || v.status === statusFilter.value
-    const matchesAge = ageCategoryFilter.value === 'All' || v.ageCategory === ageCategoryFilter.value
+      !q ||
+      v.vaccineName.toLowerCase().includes(q) ||
+      (v.abbreviation || "").toLowerCase().includes(q)
+    const matchesStatus =
+      statusFilter.value === "All" ||
+      (statusFilter.value === "Active") === !!v.status
+    const matchesAge =
+      ageCategoryFilter.value === "All" || v.ageCategory === ageCategoryFilter.value
     return matchesSearch && matchesStatus && matchesAge
   })
-)
+})
 
 /* -------------------------------- Summary ---------------------------------- */
 const summary = computed(() => ({
   total: vaccines.value.length,
-  active: vaccines.value.filter((v) => v.status === 'Active').length,
-  inactive: vaccines.value.filter((v) => v.status === 'Inactive').length,
+  active: vaccines.value.filter((v) => v.status).length,
+  inactive: vaccines.value.filter((v) => !v.status).length,
   birth: vaccines.value.filter((v) => v.ageCategory === 'Birth').length,
   infant: vaccines.value.filter((v) => infantCategories.includes(v.ageCategory)).length,
   booster: vaccines.value.filter((v) => v.ageCategory === 'Booster').length,
@@ -132,10 +80,11 @@ const openMenuId = ref(null)
 const toggleMenu = (id) => (openMenuId.value = openMenuId.value === id ? null : id)
 const closeMenu = () => (openMenuId.value = null)
 
-const setStatus = (vaccine, status) => {
-  vaccine.status = status
-  vaccine.updated = 'Today'
+async function setStatus(vaccine, activate) {
+  const updated = { ...vaccine, status: activate }
+  await axios.put(`${api}/${vaccine.vaccineID}`, updated)
   closeMenu()
+  load()
 }
 
 /* -------------------------------- Details drawer ---------------------------- */
@@ -148,68 +97,51 @@ const openDrawer = (vaccine) => {
 }
 const closeDrawer = () => (showDrawer.value = false)
 
-/* --------------------------------- Add / Edit modal --------------------------------- */
-const showFormModal = ref(false)
-const formMode = ref('add') // 'add' | 'edit'
-const vaccineForm = reactive({
-  id: null, name: '', abbreviation: '', description: '', targetDisease: '',
-  recommendedAge: '', ageCategory: 'Birth', route: 'Intramuscular', doses: 1,
-  interval: '', status: 'Active',
-})
+/* --------------------------------- Create / Edit modal --------------------------------- */
+const showModal = ref(false)
+const isEdit = ref(false)
+const form = ref({})
 
-const openAddModal = () => {
-  Object.assign(vaccineForm, {
-    id: null, name: '', abbreviation: '', description: '', targetDisease: '',
-    recommendedAge: '', ageCategory: 'Birth', route: 'Intramuscular', doses: 1,
-    interval: '', status: 'Active',
-  })
-  formMode.value = 'add'
-  showFormModal.value = true
+function openCreate() {
+  isEdit.value = false
+  form.value = {
+    vaccineName: "",
+    abbreviation: "",
+    description: "",
+    targetDisease: "",
+    recommendedAge: "",
+    ageCategory: "Birth",
+    numberOfRequiredDoses: 1,
+    doseInterval: "",
+    administrationRoute: "Intramuscular",
+    status: true,
+  }
+  showModal.value = true
 }
 
-const openEditModal = (vaccine) => {
-  Object.assign(vaccineForm, {
-    id: vaccine.id, name: vaccine.name, abbreviation: vaccine.abbreviation,
-    description: vaccine.description, targetDisease: vaccine.targetDisease,
-    recommendedAge: vaccine.recommendedAge, ageCategory: vaccine.ageCategory,
-    route: vaccine.route, doses: vaccine.doses, interval: vaccine.interval, status: vaccine.status,
-  })
-  formMode.value = 'edit'
-  showFormModal.value = true
+function edit(v) {
+  isEdit.value = true
+  form.value = { ...v }
+  showModal.value = true
   closeMenu()
 }
 
-const saveVaccine = () => {
-  if (formMode.value === 'add') {
-    vaccines.value.unshift({
-      id: Date.now(),
-      code: `VX-0${Math.floor(10 + Math.random() * 89)}`,
-      name: vaccineForm.name || 'New Vaccine',
-      abbreviation: vaccineForm.abbreviation || '—',
-      description: vaccineForm.description,
-      targetDisease: vaccineForm.targetDisease || '—',
-      recommendedAge: vaccineForm.recommendedAge || '—',
-      ageCategory: vaccineForm.ageCategory,
-      route: vaccineForm.route,
-      doses: vaccineForm.doses,
-      interval: vaccineForm.interval || 'Single dose',
-      status: vaccineForm.status,
-      created: 'Today',
-      updated: 'Today',
-    })
+async function save() {
+  if (isEdit.value) {
+    await axios.put(`${api}/${form.value.vaccineID}`, form.value)
   } else {
-    const v = vaccines.value.find((x) => x.id === vaccineForm.id)
-    if (v) {
-      Object.assign(v, {
-        name: vaccineForm.name, abbreviation: vaccineForm.abbreviation,
-        description: vaccineForm.description, targetDisease: vaccineForm.targetDisease,
-        recommendedAge: vaccineForm.recommendedAge, ageCategory: vaccineForm.ageCategory,
-        route: vaccineForm.route, doses: vaccineForm.doses, interval: vaccineForm.interval,
-        status: vaccineForm.status, updated: 'Today',
-      })
-    }
+    await axios.post(api, form.value)
   }
-  showFormModal.value = false
+  showModal.value = false
+  load()
+}
+
+async function remove(id) {
+  if (!confirm("Delete vaccine?")) return
+  await axios.delete(`${api}/${id}`)
+  closeMenu()
+  closeDrawer()
+  load()
 }
 </script>
 
@@ -334,9 +266,9 @@ const saveVaccine = () => {
             <div class="relative flex-1 min-w-0">
               <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm" aria-hidden="true">🔍</span>
               <input
-                v-model="searchQuery"
+                v-model="search"
                 type="text"
-                placeholder="Search by vaccine name or vaccine code..."
+                placeholder="Search by vaccine name or abbreviation..."
                 class="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 bg-slate-50 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors"
               />
             </div>
@@ -363,7 +295,7 @@ const saveVaccine = () => {
                 Export
               </button>
               <button
-                @click="openAddModal"
+                @click="openCreate"
                 class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
               >
                 + Add Vaccine
@@ -384,61 +316,59 @@ const saveVaccine = () => {
                   <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">No. of Doses</th>
                   <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Dose Interval</th>
                   <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Status</th>
-                  <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Last Updated</th>
                   <th class="text-right font-semibold text-slate-500 text-xs uppercase tracking-wide px-5 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 <tr
                   v-for="vaccine in filteredVaccines"
-                  :key="vaccine.id"
+                  :key="vaccine.vaccineID"
                   class="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors"
                 >
                   <td class="px-5 py-3">
                     <div class="flex items-center gap-3">
                       <div class="w-9 h-9 rounded-lg bg-teal-50 flex items-center justify-center text-sm shrink-0">💉</div>
                       <div class="min-w-0">
-                        <p class="font-semibold text-slate-900 whitespace-nowrap">{{ vaccine.name }}</p>
-                        <p class="text-xs text-slate-400 font-mono">{{ vaccine.code }}</p>
+                        <p class="font-semibold text-slate-900 whitespace-nowrap">{{ vaccine.vaccineName }}</p>
+                        <p class="text-xs text-slate-400 font-mono">ID: {{ vaccine.vaccineID }}</p>
                       </div>
                     </div>
                   </td>
                   <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.abbreviation }}</td>
                   <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.recommendedAge }}</td>
-                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.doses }}</td>
-                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.interval }}</td>
+                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.numberOfRequiredDoses }}</td>
+                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.doseInterval }}</td>
                   <td class="px-3 py-3">
-                    <span :class="[statusMeta[vaccine.status].tint, statusMeta[vaccine.status].text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
-                      <span :class="statusMeta[vaccine.status].dot" class="w-1.5 h-1.5 rounded-full"></span>
-                      {{ vaccine.status }}
+                    <span :class="[getStatusMeta(vaccine.status).tint, getStatusMeta(vaccine.status).text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
+                      <span :class="getStatusMeta(vaccine.status).dot" class="w-1.5 h-1.5 rounded-full"></span>
+                      {{ getStatusMeta(vaccine.status).label }}
                     </span>
                   </td>
-                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.updated }}</td>
                   <td class="px-5 py-3 text-right relative">
                     <button
-                      @click.stop="toggleMenu(vaccine.id)"
+                      @click.stop="toggleMenu(vaccine.vaccineID)"
                       class="text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg w-8 h-8 inline-flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                     >
                       ⋮
                     </button>
 
                     <div
-                      v-if="openMenuId === vaccine.id"
+                      v-if="openMenuId === vaccine.vaccineID"
                       @click.stop
                       class="absolute right-5 top-11 z-30 w-48 bg-white border border-slate-200 rounded-lg shadow-md py-1 text-left"
                     >
                       <button @click="openDrawer(vaccine)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">View Details</button>
-                      <button @click="openEditModal(vaccine)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">Edit Vaccine</button>
+                      <button @click="edit(vaccine)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">Edit Vaccine</button>
                       <div class="my-1 border-t border-slate-100"></div>
-                      <button v-if="vaccine.status !== 'Active'" @click="setStatus(vaccine, 'Active')" class="w-full text-left px-3.5 py-2 text-sm text-emerald-700 hover:bg-emerald-50 transition-colors">Activate</button>
-                      <button v-if="vaccine.status === 'Active'" @click="setStatus(vaccine, 'Inactive')" class="w-full text-left px-3.5 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors">Deactivate</button>
-                      <button @click="closeMenu" class="w-full text-left px-3.5 py-2 text-sm text-rose-600 hover:bg-rose-50 transition-colors">Archive</button>
+                      <button v-if="!vaccine.status" @click="setStatus(vaccine, true)" class="w-full text-left px-3.5 py-2 text-sm text-emerald-700 hover:bg-emerald-50 transition-colors">Activate</button>
+                      <button v-if="vaccine.status" @click="setStatus(vaccine, false)" class="w-full text-left px-3.5 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors">Deactivate</button>
+                      <button @click="remove(vaccine.vaccineID)" class="w-full text-left px-3.5 py-2 text-sm text-rose-600 hover:bg-rose-50 transition-colors">Delete</button>
                     </div>
                   </td>
                 </tr>
 
                 <tr v-if="filteredVaccines.length === 0">
-                  <td colspan="8" class="px-5 py-12 text-center text-sm text-slate-400">No vaccines match your search or filters.</td>
+                  <td colspan="7" class="px-5 py-12 text-center text-sm text-slate-400">No vaccines match your search or filters.</td>
                 </tr>
               </tbody>
             </table>
@@ -462,11 +392,11 @@ const saveVaccine = () => {
           <div class="flex flex-col items-center text-center gap-3">
             <div class="w-16 h-16 rounded-full bg-teal-50 flex items-center justify-center text-2xl">💉</div>
             <div>
-              <p class="text-base font-bold text-slate-900">{{ selectedVaccine.name }}</p>
-              <p class="text-xs text-slate-400 font-mono mt-0.5">{{ selectedVaccine.code }}</p>
-              <span :class="[statusMeta[selectedVaccine.status].tint, statusMeta[selectedVaccine.status].text]" class="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full">
-                <span :class="statusMeta[selectedVaccine.status].dot" class="w-1.5 h-1.5 rounded-full"></span>
-                {{ selectedVaccine.status }}
+              <p class="text-base font-bold text-slate-900">{{ selectedVaccine.vaccineName }}</p>
+              <p class="text-xs text-slate-400 font-mono mt-0.5">ID: {{ selectedVaccine.vaccineID }}</p>
+              <span :class="[getStatusMeta(selectedVaccine.status).tint, getStatusMeta(selectedVaccine.status).text]" class="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <span :class="getStatusMeta(selectedVaccine.status).dot" class="w-1.5 h-1.5 rounded-full"></span>
+                {{ getStatusMeta(selectedVaccine.status).label }}
               </span>
             </div>
           </div>
@@ -490,30 +420,26 @@ const saveVaccine = () => {
               <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.recommendedAge }}</span>
             </div>
             <div class="flex items-center justify-between px-4 py-3">
+              <span class="text-xs text-slate-500">Age Category</span>
+              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.ageCategory }}</span>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3">
               <span class="text-xs text-slate-500">Required Doses</span>
-              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.doses }}</span>
+              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.numberOfRequiredDoses }}</span>
             </div>
             <div class="flex items-center justify-between px-4 py-3">
               <span class="text-xs text-slate-500">Dose Interval</span>
-              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.interval }}</span>
+              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.doseInterval }}</span>
             </div>
             <div class="flex items-center justify-between px-4 py-3">
               <span class="text-xs text-slate-500">Administration Route</span>
-              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.route }}</span>
-            </div>
-            <div class="flex items-center justify-between px-4 py-3">
-              <span class="text-xs text-slate-500">Date Created</span>
-              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.created }}</span>
-            </div>
-            <div class="flex items-center justify-between px-4 py-3">
-              <span class="text-xs text-slate-500">Last Updated</span>
-              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.updated }}</span>
+              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.administrationRoute }}</span>
             </div>
           </div>
         </div>
 
         <div class="border-t border-slate-200 p-4 flex items-center gap-2 shrink-0">
-          <button @click="openEditModal(selectedVaccine)" class="flex-1 text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Edit Vaccine</button>
+          <button @click="edit(selectedVaccine)" class="flex-1 text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Edit Vaccine</button>
           <button @click="closeDrawer" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Close</button>
         </div>
       </aside>
@@ -521,69 +447,65 @@ const saveVaccine = () => {
 
     <!-- ============================ ADD / EDIT VACCINE MODAL ============================ -->
     <transition name="fade">
-      <div v-if="showFormModal" class="fixed inset-0 bg-slate-900/40 z-40 flex items-center justify-center p-4" @click.self="showFormModal = false">
+      <div v-if="showModal" class="fixed inset-0 bg-slate-900/40 z-40 flex items-center justify-center p-4" @click.self="showModal = false">
         <div class="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-            <h2 class="text-base font-bold text-slate-900">{{ formMode === 'add' ? 'Add Vaccine' : 'Edit Vaccine' }}</h2>
-            <button @click="showFormModal = false" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
+            <h2 class="text-base font-bold text-slate-900">{{ isEdit ? 'Edit Vaccine' : 'Add Vaccine' }}</h2>
+            <button @click="showModal = false" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
           </div>
 
           <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Vaccine Name</label>
-              <input v-model="vaccineForm.name" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <input v-model="form.vaccineName" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Abbreviation</label>
-              <input v-model="vaccineForm.abbreviation" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <input v-model="form.abbreviation" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div class="sm:col-span-2">
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Description</label>
-              <textarea v-model="vaccineForm.description" rows="2" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors resize-none"></textarea>
+              <textarea v-model="form.description" rows="2" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors resize-none"></textarea>
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Target Disease</label>
-              <input v-model="vaccineForm.targetDisease" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <input v-model="form.targetDisease" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Recommended Age</label>
-              <input v-model="vaccineForm.recommendedAge" type="text" placeholder="e.g. 6, 10, 14 weeks" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <input v-model="form.recommendedAge" type="text" placeholder="e.g. 6, 10, 14 weeks" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Age Category</label>
-              <select v-model="vaccineForm.ageCategory" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
+              <select v-model="form.ageCategory" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
                 <option v-for="cat in ageCategoryOptions" :key="cat" :value="cat">{{ cat }}</option>
               </select>
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Administration Route</label>
-              <select v-model="vaccineForm.route" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
-                <option>Intramuscular</option>
-                <option>Intradermal</option>
-                <option>Subcutaneous</option>
-                <option>Oral</option>
+              <select v-model="form.administrationRoute" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
+                <option v-for="r in routeOptions" :key="r" :value="r">{{ r }}</option>
               </select>
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Number of Required Doses</label>
-              <input v-model.number="vaccineForm.doses" type="number" min="1" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <input v-model.number="form.numberOfRequiredDoses" type="number" min="1" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Dose Interval</label>
-              <input v-model="vaccineForm.interval" type="text" placeholder="e.g. 4 weeks apart" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <input v-model="form.doseInterval" type="text" placeholder="e.g. 4 weeks apart" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Status</label>
-              <select v-model="vaccineForm.status" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
-                <option>Active</option>
-                <option>Inactive</option>
-              </select>
+            <div class="flex items-end pb-2.5">
+              <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                <input type="checkbox" v-model="form.status" class="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
+                Active
+              </label>
             </div>
           </div>
 
           <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200">
-            <button @click="showFormModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-            <button @click="saveVaccine" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Save Vaccine</button>
+            <button @click="showModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+            <button @click="save" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Save Vaccine</button>
           </div>
         </div>
       </div>
