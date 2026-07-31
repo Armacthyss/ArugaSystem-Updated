@@ -33,6 +33,7 @@ import SystemAdminInventory from '@/components/SystemAdmin/SysAd-Inventory.vue';
 import SystemAdminNotification from '@/components/SystemAdmin/SysAd-Notification.vue';
 import SystemAdminReports from '@/components/SystemAdmin/SysAd-Reports.vue';
 import SystemAuditlogs from '@/components/SystemAdmin/SysAd-Auditlogs.vue';
+import TestAPI from '@/components/SystemAdmin/TestAPI.vue';
 
 // ── Staff (Second version) ──────────────────────────────────
 import StaffDashboard from '@/components/Staff/StaffDashboard.vue';
@@ -71,6 +72,7 @@ const routes = [
   {path: '/system-admin/notifications', component: SystemAdminNotification},
   {path: '/system-admin/reports', component: SystemAdminReports},
   {path: '/system-admin/audit-logs', component: SystemAuditlogs},
+  {path: '/system-admin/test-api', component: TestAPI},
 
   // ── Staff (Second version) ──────────────────────────────────
   {path: '/staff/dashboard', component: StaffDashboard},

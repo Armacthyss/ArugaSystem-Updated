@@ -1,9 +1,10 @@
 <script setup>
 import axios from "axios"
-import { ref, computed, reactive, onMounted } from "vue"
+import { ref, computed, onMounted } from "vue"
 
 /* ------------------------------- API config ------------------------------- */
 const api = "http://localhost:57147/api/Vaccines"
+const doseApi = "http://localhost:57147/api/VaccineDoses"
 
 /* --------------------------------- Sidebar --------------------------------- */
 const isCollapsed = ref(false)
@@ -36,13 +37,34 @@ const routeOptions = ['Intramuscular', 'Intradermal', 'Subcutaneous', 'Oral']
 
 /* -------------------------------- Vaccine data (API) -------------------------------- */
 const vaccines = ref([])
+const allDoses = ref([])
 
 async function load() {
   const res = await axios.get(api)
   vaccines.value = res.data
 }
 
-onMounted(load)
+async function loadAllDoses() {
+  const res = await axios.get(doseApi)
+  allDoses.value = res.data
+}
+
+onMounted(() => {
+  load()
+  loadAllDoses()
+})
+
+/* ------------------------- Doses grouped by vaccine ------------------------- */
+const dosesByVaccine = computed(() => {
+  const map = {}
+  for (const d of allDoses.value) {
+    if (!map[d.vaccineID]) map[d.vaccineID] = []
+    map[d.vaccineID].push(d)
+  }
+  Object.values(map).forEach((list) => list.sort((a, b) => a.doseNumber - b.doseNumber))
+  return map
+})
+const getDoses = (vaccineID) => dosesByVaccine.value[vaccineID] || []
 
 /* ---------------------------- Toolbar / filters ---------------------------- */
 const search = ref("")
@@ -101,9 +123,51 @@ const closeDrawer = () => (showDrawer.value = false)
 const showModal = ref(false)
 const isEdit = ref(false)
 const form = ref({})
+const savingVaccine = ref(false)
+const saveError = ref("")
+
+/* Dose Schedule builder state (lives inside the Add/Edit Vaccine modal) */
+const doseSchedule = ref([]) // [{ doseID, doseNumber, minIntervalDays }]
+const originalDoseIds = ref(new Set())
+const doseScheduleLoading = ref(false)
+
+function addDoseRow() {
+  doseSchedule.value.push({
+    doseID: 0,
+    doseNumber: doseSchedule.value.length + 1,
+    minIntervalDays: 0,
+  })
+}
+
+function removeDoseRow(index) {
+  doseSchedule.value.splice(index, 1)
+  // renumber remaining doses
+  doseSchedule.value.forEach((d, i) => (d.doseNumber = i + 1))
+}
+
+async function loadDosesForEdit(vaccineId) {
+  doseScheduleLoading.value = true
+  try {
+    const res = await axios.get(`${doseApi}/vaccine/${vaccineId}`)
+    const sorted = [...res.data].sort((a, b) => a.doseNumber - b.doseNumber)
+    doseSchedule.value = sorted.map((d) => ({
+      doseID: d.doseID,
+      doseNumber: d.doseNumber,
+      minIntervalDays: d.minIntervalDays,
+    }))
+    originalDoseIds.value = new Set(sorted.map((d) => d.doseID))
+  } catch (err) {
+    saveError.value = "Unable to load the dose schedule for this vaccine."
+    doseSchedule.value = []
+    originalDoseIds.value = new Set()
+  } finally {
+    doseScheduleLoading.value = false
+  }
+}
 
 function openCreate() {
   isEdit.value = false
+  saveError.value = ""
   form.value = {
     vaccineName: "",
     abbreviation: "",
@@ -111,29 +175,81 @@ function openCreate() {
     targetDisease: "",
     recommendedAge: "",
     ageCategory: "Birth",
-    numberOfRequiredDoses: 1,
-    doseInterval: "",
     administrationRoute: "Intramuscular",
     status: true,
   }
+  doseSchedule.value = [{ doseID: 0, doseNumber: 1, minIntervalDays: 0 }]
+  originalDoseIds.value = new Set()
+  doseScheduleLoading.value = false
   showModal.value = true
 }
 
 function edit(v) {
   isEdit.value = true
+  saveError.value = ""
   form.value = { ...v }
+  doseSchedule.value = []
   showModal.value = true
   closeMenu()
+  loadDosesForEdit(v.vaccineID)
 }
 
 async function save() {
-  if (isEdit.value) {
-    await axios.put(`${api}/${form.value.vaccineID}`, form.value)
-  } else {
-    await axios.post(api, form.value)
+  saveError.value = ""
+  savingVaccine.value = true
+  try {
+    if (isEdit.value) {
+      const vaccineID = form.value.vaccineID
+      await axios.put(`${api}/${vaccineID}`, form.value)
+
+      // Diff dose schedule: delete removed, update existing, insert new
+      const currentIds = new Set(
+        doseSchedule.value.filter((d) => d.doseID).map((d) => d.doseID)
+      )
+      const toDelete = [...originalDoseIds.value].filter((id) => !currentIds.has(id))
+
+      await Promise.all(toDelete.map((id) => axios.delete(`${doseApi}/${id}`)))
+
+      await Promise.all(
+        doseSchedule.value.map((d, idx) => {
+          const doseNumber = idx + 1
+          if (d.doseID) {
+            return axios.put(`${doseApi}/${d.doseID}`, {
+              doseID: d.doseID,
+              vaccineID,
+              doseNumber,
+              minIntervalDays: d.minIntervalDays,
+            })
+          }
+          return axios.post(doseApi, {
+            vaccineID,
+            doseNumber,
+            minIntervalDays: d.minIntervalDays,
+          })
+        })
+      )
+    } else {
+      const res = await axios.post(api, form.value)
+      const vaccineID = res.data.vaccineID ?? res.data.VaccineID
+
+      await Promise.all(
+        doseSchedule.value.map((d, idx) =>
+          axios.post(doseApi, {
+            vaccineID,
+            doseNumber: idx + 1,
+            minIntervalDays: d.minIntervalDays,
+          })
+        )
+      )
+    }
+
+    showModal.value = false
+    await Promise.all([load(), loadAllDoses()])
+  } catch (err) {
+    saveError.value = "Unable to save this vaccine. Please check the details and try again."
+  } finally {
+    savingVaccine.value = false
   }
-  showModal.value = false
-  load()
 }
 
 async function remove(id) {
@@ -141,7 +257,7 @@ async function remove(id) {
   await axios.delete(`${api}/${id}`)
   closeMenu()
   closeDrawer()
-  load()
+  await Promise.all([load(), loadAllDoses()])
 }
 </script>
 
@@ -314,7 +430,7 @@ async function remove(id) {
                   <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Abbreviation</th>
                   <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Recommended Age</th>
                   <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">No. of Doses</th>
-                  <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Dose Interval</th>
+                  <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Dose Schedule</th>
                   <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Status</th>
                   <th class="text-right font-semibold text-slate-500 text-xs uppercase tracking-wide px-5 py-3">Actions</th>
                 </tr>
@@ -336,8 +452,19 @@ async function remove(id) {
                   </td>
                   <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.abbreviation }}</td>
                   <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.recommendedAge }}</td>
-                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.numberOfRequiredDoses }}</td>
-                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ vaccine.doseInterval }}</td>
+                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ getDoses(vaccine.vaccineID).length }}</td>
+                  <td class="px-3 py-3">
+                    <div v-if="getDoses(vaccine.vaccineID).length" class="flex flex-wrap gap-1 max-w-[240px]">
+                      <span
+                        v-for="d in getDoses(vaccine.vaccineID)"
+                        :key="d.doseID"
+                        class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 whitespace-nowrap"
+                      >
+                        Dose {{ d.doseNumber }}<span v-if="d.minIntervalDays">&nbsp;(+{{ d.minIntervalDays }}d)</span>
+                      </span>
+                    </div>
+                    <span v-else class="text-xs text-slate-400">No doses configured</span>
+                  </td>
                   <td class="px-3 py-3">
                     <span :class="[getStatusMeta(vaccine.status).tint, getStatusMeta(vaccine.status).text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
                       <span :class="getStatusMeta(vaccine.status).dot" class="w-1.5 h-1.5 rounded-full"></span>
@@ -424,17 +551,24 @@ async function remove(id) {
               <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.ageCategory }}</span>
             </div>
             <div class="flex items-center justify-between px-4 py-3">
-              <span class="text-xs text-slate-500">Required Doses</span>
-              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.numberOfRequiredDoses }}</span>
-            </div>
-            <div class="flex items-center justify-between px-4 py-3">
-              <span class="text-xs text-slate-500">Dose Interval</span>
-              <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.doseInterval }}</span>
-            </div>
-            <div class="flex items-center justify-between px-4 py-3">
               <span class="text-xs text-slate-500">Administration Route</span>
               <span class="text-sm font-medium text-slate-900">{{ selectedVaccine.administrationRoute }}</span>
             </div>
+          </div>
+
+          <div>
+            <h3 class="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Dose Schedule</h3>
+            <div v-if="getDoses(selectedVaccine.vaccineID).length" class="bg-slate-50 rounded-lg divide-y divide-slate-200">
+              <div
+                v-for="d in getDoses(selectedVaccine.vaccineID)"
+                :key="d.doseID"
+                class="flex items-center justify-between px-4 py-3"
+              >
+                <span class="text-sm font-medium text-slate-900">Dose {{ d.doseNumber }}</span>
+                <span class="text-xs text-slate-500">{{ d.minIntervalDays }} day minimum interval</span>
+              </div>
+            </div>
+            <p v-else class="text-sm text-slate-400 bg-slate-50 rounded-lg p-4">No doses configured yet.</p>
           </div>
         </div>
 
@@ -445,67 +579,125 @@ async function remove(id) {
       </aside>
     </transition>
 
-    <!-- ============================ ADD / EDIT VACCINE MODAL ============================ -->
+    <!-- ============================ ADD / EDIT VACCINE MODAL (Vaccine Builder) ============================ -->
     <transition name="fade">
-      <div v-if="showModal" class="fixed inset-0 bg-slate-900/40 z-40 flex items-center justify-center p-4" @click.self="showModal = false">
+      <div v-if="showModal" class="fixed inset-0 bg-slate-900/40 z-40 flex items-center justify-center p-4" @click.self="!savingVaccine && (showModal = false)">
         <div class="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
             <h2 class="text-base font-bold text-slate-900">{{ isEdit ? 'Edit Vaccine' : 'Add Vaccine' }}</h2>
-            <button @click="showModal = false" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
+            <button @click="showModal = false" :disabled="savingVaccine" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors disabled:opacity-40">✕</button>
           </div>
 
-          <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="p-6 space-y-6">
+            <p v-if="saveError" class="text-sm text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-4 py-2.5">{{ saveError }}</p>
+
+            <!-- Core vaccine fields -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 mb-1.5">Vaccine Name</label>
+                <input v-model="form.vaccineName" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 mb-1.5">Abbreviation</label>
+                <input v-model="form.abbreviation" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 mb-1.5">Description</label>
+                <textarea v-model="form.description" rows="2" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors resize-none"></textarea>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 mb-1.5">Target Disease</label>
+                <input v-model="form.targetDisease" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 mb-1.5">Recommended Age</label>
+                <input v-model="form.recommendedAge" type="text" placeholder="e.g. 6, 10, 14 weeks" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 mb-1.5">Age Category</label>
+                <select v-model="form.ageCategory" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
+                  <option v-for="cat in ageCategoryOptions" :key="cat" :value="cat">{{ cat }}</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 mb-1.5">Administration Route</label>
+                <select v-model="form.administrationRoute" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
+                  <option v-for="r in routeOptions" :key="r" :value="r">{{ r }}</option>
+                </select>
+              </div>
+              <div class="flex items-end pb-2.5">
+                <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <input type="checkbox" v-model="form.status" class="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
+                  Active
+                </label>
+              </div>
+            </div>
+
+            <!-- Dose Schedule builder -->
             <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Vaccine Name</label>
-              <input v-model="form.vaccineName" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Abbreviation</label>
-              <input v-model="form.abbreviation" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
-            <div class="sm:col-span-2">
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Description</label>
-              <textarea v-model="form.description" rows="2" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors resize-none"></textarea>
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Target Disease</label>
-              <input v-model="form.targetDisease" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Recommended Age</label>
-              <input v-model="form.recommendedAge" type="text" placeholder="e.g. 6, 10, 14 weeks" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Age Category</label>
-              <select v-model="form.ageCategory" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
-                <option v-for="cat in ageCategoryOptions" :key="cat" :value="cat">{{ cat }}</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Administration Route</label>
-              <select v-model="form.administrationRoute" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
-                <option v-for="r in routeOptions" :key="r" :value="r">{{ r }}</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Number of Required Doses</label>
-              <input v-model.number="form.numberOfRequiredDoses" type="number" min="1" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Dose Interval</label>
-              <input v-model="form.doseInterval" type="text" placeholder="e.g. 4 weeks apart" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
-            <div class="flex items-end pb-2.5">
-              <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
-                <input type="checkbox" v-model="form.status" class="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
-                Active
-              </label>
+              <div class="flex items-center justify-between mb-2">
+                <div>
+                  <h3 class="text-sm font-bold text-slate-900">Dose Schedule</h3>
+                  <p class="text-xs text-slate-500">Dose numbers are automatic. Set the minimum interval before each dose can be given.</p>
+                </div>
+                <button
+                  type="button"
+                  @click="addDoseRow"
+                  class="text-sm font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                >
+                  + Add Dose
+                </button>
+              </div>
+
+              <div v-if="doseScheduleLoading" class="text-sm text-slate-400 bg-slate-50 rounded-lg px-4 py-8 text-center">
+                Loading dose schedule…
+              </div>
+
+              <div v-else class="space-y-2">
+                <div
+                  v-for="(dose, index) in doseSchedule"
+                  :key="dose.doseID ? 'd-' + dose.doseID : 'new-' + index"
+                  class="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3"
+                >
+                  <div class="w-16 shrink-0">
+                    <p class="text-xs font-semibold text-slate-500">Dose</p>
+                    <p class="text-sm font-bold text-slate-900">{{ index + 1 }}</p>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Minimum Interval (days)</label>
+                    <input
+                      v-model.number="dose.minIntervalDays"
+                      type="number"
+                      min="0"
+                      class="w-full text-sm rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    @click="removeDoseRow(index)"
+                    class="shrink-0 text-rose-500 hover:bg-rose-50 rounded-lg w-8 h-8 flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                    title="Remove dose"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <p v-if="doseSchedule.length === 0" class="text-sm text-slate-400 bg-slate-50 rounded-lg px-4 py-8 text-center">
+                  No doses configured yet. Add at least one dose.
+                </p>
+              </div>
             </div>
           </div>
 
           <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200">
-            <button @click="showModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-            <button @click="save" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Save Vaccine</button>
+            <button @click="showModal = false" :disabled="savingVaccine" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40">Cancel</button>
+            <button
+              @click="save"
+              :disabled="savingVaccine || doseScheduleLoading"
+              class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
+            >
+              {{ savingVaccine ? 'Saving…' : 'Save Vaccine' }}
+            </button>
           </div>
         </div>
       </div>

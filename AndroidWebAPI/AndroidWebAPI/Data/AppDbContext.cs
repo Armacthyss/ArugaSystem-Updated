@@ -16,6 +16,8 @@ namespace AndroidWebAPI.Data
         public DbSet<VaccinationRecord> VaccinationRecords { get; set; }
         public DbSet<Vaccine> Vaccines { get; set; }
         public DbSet<VaccineDose> VaccineDoses { get; set; }
+        public DbSet<VaccineInventory> VaccineInventory { get; set; }
+        
         public DbSet<ChildParentRelationship> ChildParentRelationships { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)

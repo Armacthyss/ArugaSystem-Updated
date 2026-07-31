@@ -14,7 +14,8 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddScoped<VaccineRepository>();
-
+builder.Services.AddScoped<VaccineDoseRepository>();
+builder.Services.AddScoped<VaccineInventoryRepository>();
 builder.Services.AddScoped<ParentRepository>();          // ← only once
 builder.Services.AddDbContext<AppDbContext>(options =>   // ← only once
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));

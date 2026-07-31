@@ -199,4 +199,72 @@ export const apiService = {
       throw error;
     }
   },
+
+  // ========================================
+// VACCINE INVENTORY
+// ========================================
+
+async getInventory() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/VaccineInventory`);
+
+    if (!response.ok)
+      throw new Error("Failed to fetch inventory");
+
+    return await response.json();
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+},
+
+async getInventoryById(id) {
+  const response = await fetch(`${API_BASE_URL}/VaccineInventory/${id}`);
+
+  if (!response.ok)
+    throw new Error("Failed to fetch inventory");
+
+  return await response.json();
+},
+
+async createInventory(data) {
+  const response = await fetch(`${API_BASE_URL}/VaccineInventory`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok)
+    throw new Error("Failed to create inventory");
+
+  return await response.json();
+},
+
+async updateInventory(id, data) {
+  const response = await fetch(`${API_BASE_URL}/VaccineInventory/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok)
+    throw new Error("Failed to update inventory");
+
+  return await response.json();
+},
+
+async deleteInventory(id) {
+  const response = await fetch(`${API_BASE_URL}/VaccineInventory/${id}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok)
+    throw new Error("Failed to delete inventory");
+
+  return true;
+},
 };
