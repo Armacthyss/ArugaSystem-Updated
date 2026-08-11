@@ -57,5 +57,23 @@ namespace AndroidWebAPI.Data.Repositories
                 await _context.SaveChangesAsync();
             }
         }
+
+
+        public async Task<bool> ExistsAsync(int vaccineId, int doseNumber)
+{
+    return await _context.VaccinationScheduleRules
+        .AnyAsync(r =>
+            r.VaccineID == vaccineId &&
+            r.DoseNumber == doseNumber);
+}
+
+public async Task<IEnumerable<VaccinationScheduleRule>> GetScheduleAsync()
+{
+    return await _context.VaccinationScheduleRules
+        .Include(r => r.Vaccine)
+        .OrderBy(r => r.SequenceOrder)
+        .ThenBy(r => r.DoseNumber)
+        .ToListAsync();
+}
     }
 }

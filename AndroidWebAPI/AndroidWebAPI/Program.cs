@@ -1,6 +1,7 @@
 using AndroidWebAPI.Data;
+using AndroidWebAPI.Data.Repositories;
 using Microsoft.EntityFrameworkCore;
-
+using AndroidWebAPI.DTOs;
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Ports ────────────────────────────────────────────────────
@@ -16,6 +17,13 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddScoped<VaccineRepository>();
 builder.Services.AddScoped<VaccineDoseRepository>();
 builder.Services.AddScoped<VaccineInventoryRepository>();
+builder.Services.AddScoped<IVaccinationTimelineRepository, VaccinationTimelineRepository>();
+
+builder.Services.AddScoped<IVaccinationRecordRepository, VaccinationRecordRepository>();
+
+builder.Services.AddScoped<IVaccinationScheduleRuleRepository, VaccinationScheduleRuleRepository>();
+
+builder.Services.AddScoped<IChildrenRepository, ChildrenRepository>();
 builder.Services.AddScoped<ParentRepository>();          // ← only once
 builder.Services.AddDbContext<AppDbContext>(options =>   // ← only once
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));

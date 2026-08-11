@@ -5,6 +5,142 @@ import { ref, computed, onMounted } from "vue"
 /* ------------------------------- API config ------------------------------- */
 const api = "http://localhost:57147/api/Vaccines"
 const doseApi = "http://localhost:57147/api/VaccineDoses"
+const ruleApi = "http://localhost:57147/api/VaccinationScheduleRules"
+
+/* ------------------------- Age preset conversion (UI only) -------------------------
+   The database/API still only ever sees recommendedAgeDays / minimumAgeDays /
+   intervalFromPreviousDoseDays as plain integers. These helpers translate the
+   Recommended Visit picked in the UI into those numbers automatically, using the
+   visit schedule from the Philippine National Immunization Program (NIP)
+   immunization card. Minimum Age and Minimum Interval are never typed by hand:
+   MinimumAgeDays always mirrors RecommendedAgeDays, and
+   IntervalFromPreviousDoseDays is always CurrentDose - PreviousDose. */
+const CUSTOM_OPTION = "Custom..."
+
+const AGE_PRESETS = [
+  { label: "At Birth", days: 0 },
+  { label: "1st Visit (6 Weeks / 1½ Months)", days: 42 },
+  { label: "2nd Visit (10 Weeks / 2½ Months)", days: 70 },
+  { label: "3rd Visit (14 Weeks / 3½ Months)", days: 98 },
+  { label: "4th Visit (9 Months)", days: 270 },
+  { label: "5th Visit (12 Months)", days: 365 },
+  { label: "6th Visit (15 Months)", days: 455 },
+  { label: "7th Visit (18 Months)", days: 548 },
+]
+const agePresetOptions = [...AGE_PRESETS.map((p) => p.label), CUSTOM_OPTION]
+
+const ageUnitOptions = ["Days", "Weeks", "Months"]
+const unitToDayFactor = { Days: 1, Weeks: 7, Months: 30 }
+
+function presetDaysByLabel(label) {
+  const preset = AGE_PRESETS.find((p) => p.label === label)
+  return preset ? preset.days : 0
+}
+
+function daysToPresetLabel(days) {
+  const preset = AGE_PRESETS.find((p) => p.days === days)
+  return preset ? preset.label : CUSTOM_OPTION
+}
+
+function daysToCustomParts(days) {
+  if (days !== 0 && days % 30 === 0) return { value: days / 30, unit: "Months" }
+  if (days !== 0 && days % 7 === 0) return { value: days / 7, unit: "Weeks" }
+  return { value: days, unit: "Days" }
+}
+
+function customToDays(value, unit) {
+  const factor = unitToDayFactor[unit] || 1
+  return Math.round((Number(value) || 0) * factor)
+}
+
+/* Builds the preset/custom UI fields for a given stored recommendedAgeDays value. */
+function buildAgeFieldFromDays(days) {
+  const preset = daysToPresetLabel(days)
+  if (preset !== CUSTOM_OPTION) {
+    return { preset, customValue: null, customUnit: "Days" }
+  }
+  const custom = daysToCustomParts(days)
+  return { preset: CUSTOM_OPTION, customValue: custom.value, customUnit: custom.unit }
+}
+
+/* Called on the Recommended Visit <select> change to resolve the chosen preset (or
+   the current custom value) into a day count, then re-validates/recomputes
+   everything downstream. */
+function onAgePresetChange(dose, index) {
+  const preset = dose.recommendedAgePreset
+  if (preset === CUSTOM_OPTION) {
+    if (!dose.recommendedAgeCustomValue) dose.recommendedAgeCustomValue = 1
+    if (!dose.recommendedAgeCustomUnit) dose.recommendedAgeCustomUnit = "Days"
+    dose.recommendedAgeDays = customToDays(dose.recommendedAgeCustomValue, dose.recommendedAgeCustomUnit)
+  } else if (preset) {
+    dose.recommendedAgeDays = presetDaysByLabel(preset)
+  } else {
+    dose.recommendedAgeDays = null
+  }
+  cascadeRecommendedAgeValidation(index)
+  normalizeDoseSchedule()
+}
+
+/* Called when the Custom value/unit inputs change. */
+function onAgeCustomChange(dose, index) {
+  dose.recommendedAgeDays = customToDays(dose.recommendedAgeCustomValue, dose.recommendedAgeCustomUnit)
+  cascadeRecommendedAgeValidation(index)
+  normalizeDoseSchedule()
+}
+
+/* ------------------- Chronological Recommended Visit enforcement -------------------
+   Recommended Age must be monotonically non-decreasing across doses. The dropdown
+   for each dose is filtered down to visits that are on or after the previous
+   dose's recommended age, and Custom is always offered (its value is checked
+   separately via doseVisitError). */
+
+/* Visit presets selectable for a given dose row, given the resolved recommended-age
+   day value of the dose before it. Dose 1 has no lower bound. */
+function availablePresetsForIndex(index) {
+  if (index === 0) return agePresetOptions
+  const prev = doseSchedule.value[index - 1]
+  const minDays = prev ? prev.recommendedAgeDays : 0
+  const options = AGE_PRESETS.filter((p) => p.days >= minDays).map((p) => p.label)
+  return [...options, CUSTOM_OPTION]
+}
+
+/* Single source of truth for a dose row's Recommended Visit validity: required,
+   then (for doses after the first) chronological ordering against the previous
+   dose. Returns "" when valid. */
+function doseVisitError(index) {
+  const dose = doseSchedule.value[index]
+  if (!dose.recommendedAgePreset || dose.recommendedAgeDays === null || dose.recommendedAgeDays === undefined) {
+    return "Recommended visit is required."
+  }
+
+  if (index > 0) {
+    const prev = doseSchedule.value[index - 1]
+    if (dose.recommendedAgeDays < prev.recommendedAgeDays) {
+      if (dose.recommendedAgePreset === CUSTOM_OPTION) {
+        return `Custom value must be at least ${prev.recommendedAgeDays} day(s) (Dose ${index}'s age).`
+      }
+      return `Dose ${index + 1} cannot occur earlier than Dose ${index}.`
+    }
+  }
+
+  return ""
+}
+
+/* When an earlier dose's recommended age changes, any later dose that is currently
+   pinned to a predefined visit that is no longer valid gets its selection cleared
+   (not silently reassigned) so the user must actively pick a new valid value.
+   Custom selections are left untouched here; their validity surfaces via
+   doseVisitError() and blocks Save until corrected. */
+function cascadeRecommendedAgeValidation(fromIndex) {
+  for (let i = fromIndex + 1; i < doseSchedule.value.length; i++) {
+    const minDays = doseSchedule.value[i - 1].recommendedAgeDays
+    const dose = doseSchedule.value[i]
+    if (dose.recommendedAgePreset !== CUSTOM_OPTION && dose.recommendedAgeDays < minDays) {
+      dose.recommendedAgePreset = ""
+      dose.recommendedAgeDays = null
+    }
+  }
+}
 
 /* --------------------------------- Sidebar --------------------------------- */
 const isCollapsed = ref(false)
@@ -125,41 +261,112 @@ const isEdit = ref(false)
 const form = ref({})
 const savingVaccine = ref(false)
 const saveError = ref("")
+const hasServerValidationError = ref(false)
 
-/* Dose Schedule builder state (lives inside the Add/Edit Vaccine modal) */
-const doseSchedule = ref([]) // [{ doseID, doseNumber, minIntervalDays }]
+/* Dose Schedule builder state (lives inside the Add/Edit Vaccine modal)
+   Each row merges a VaccineDose record with its matching VaccinationScheduleRule
+   record (matched by doseNumber), but both are saved to their own tables.
+   Only recommendedAgeDays is user-driven; minimumAgeDays and
+   intervalFromPreviousDoseDays are always derived automatically. */
+const doseSchedule = ref([]) // [{ doseID, ruleID, doseNumber, recommendedAgeDays, minimumAgeDays, intervalFromPreviousDoseDays, isRequired }]
 const originalDoseIds = ref(new Set())
+const originalRuleIds = ref(new Set())
 const doseScheduleLoading = ref(false)
 
+const hasScheduleErrors = computed(() =>
+  doseSchedule.value.some((_, i) => !!doseVisitError(i))
+)
+
 function addDoseRow() {
+  const isFirstDose = doseSchedule.value.length === 0
   doseSchedule.value.push({
     doseID: 0,
+    ruleID: 0,
     doseNumber: doseSchedule.value.length + 1,
-    minIntervalDays: 0,
+    recommendedAgeDays: isFirstDose ? 0 : null,
+    minimumAgeDays: isFirstDose ? 0 : null,
+    intervalFromPreviousDoseDays: 0,
+    isRequired: true,
+    recommendedAgePreset: isFirstDose ? "At Birth" : "",
+    recommendedAgeCustomValue: null,
+    recommendedAgeCustomUnit: "Days",
   })
+  normalizeDoseSchedule()
 }
 
 function removeDoseRow(index) {
   doseSchedule.value.splice(index, 1)
-  // renumber remaining doses
-  doseSchedule.value.forEach((d, i) => (d.doseNumber = i + 1))
+  normalizeDoseSchedule()
+}
+
+/* Single place where all auto-derived values are (re)computed:
+   - doseNumber is always sequential.
+   - minimumAgeDays always mirrors recommendedAgeDays.
+   - intervalFromPreviousDoseDays is always CurrentDose - PreviousDose
+     (0 for Dose 1, since it has no previous dose). None of these are ever
+     typed by the user. */
+function normalizeDoseSchedule() {
+  doseSchedule.value.forEach((d, i) => {
+    d.doseNumber = i + 1
+    d.minimumAgeDays = d.recommendedAgeDays
+
+    if (i === 0) {
+      d.intervalFromPreviousDoseDays = 0
+      return
+    }
+
+    const prev = doseSchedule.value[i - 1]
+    const hasBoth =
+      d.recommendedAgeDays !== null && d.recommendedAgeDays !== undefined &&
+      prev.recommendedAgeDays !== null && prev.recommendedAgeDays !== undefined
+
+    d.intervalFromPreviousDoseDays = hasBoth ? d.recommendedAgeDays - prev.recommendedAgeDays : null
+  })
 }
 
 async function loadDosesForEdit(vaccineId) {
   doseScheduleLoading.value = true
   try {
-    const res = await axios.get(`${doseApi}/vaccine/${vaccineId}`)
-    const sorted = [...res.data].sort((a, b) => a.doseNumber - b.doseNumber)
-    doseSchedule.value = sorted.map((d) => ({
-      doseID: d.doseID,
-      doseNumber: d.doseNumber,
-      minIntervalDays: d.minIntervalDays,
-    }))
-    originalDoseIds.value = new Set(sorted.map((d) => d.doseID))
+    const [doseRes, ruleRes] = await Promise.all([
+      axios.get(`${doseApi}/vaccine/${vaccineId}`),
+      axios.get(`${ruleApi}/vaccine/${vaccineId}`),
+    ])
+
+    const sortedDoses = [...doseRes.data].sort((a, b) => a.doseNumber - b.doseNumber)
+
+    const ruleByDoseNumber = {}
+    ruleRes.data.forEach((r) => { ruleByDoseNumber[r.doseNumber] = r })
+
+    doseSchedule.value = sortedDoses.map((d) => {
+      const rule = ruleByDoseNumber[d.doseNumber]
+      const recommendedAgeDays = rule ? rule.recommendedAgeDays : 0
+      const recommendedAgeField = buildAgeFieldFromDays(recommendedAgeDays)
+
+      return {
+        doseID: d.doseID,
+        ruleID: rule ? rule.ruleID : 0,
+        doseNumber: d.doseNumber,
+        recommendedAgeDays,
+        minimumAgeDays: recommendedAgeDays, // recomputed below, kept here for clarity
+        intervalFromPreviousDoseDays: 0, // recomputed below
+        isRequired: rule ? rule.isRequired : true,
+        recommendedAgePreset: recommendedAgeField.preset,
+        recommendedAgeCustomValue: recommendedAgeField.customValue,
+        recommendedAgeCustomUnit: recommendedAgeField.customUnit,
+      }
+    })
+    // Re-derive minimumAgeDays/intervalFromPreviousDoseDays from recommendedAgeDays
+    // rather than trusting whatever was stored previously, since those two fields
+    // are no longer independently editable.
+    normalizeDoseSchedule()
+
+    originalDoseIds.value = new Set(sortedDoses.map((d) => d.doseID))
+    originalRuleIds.value = new Set(ruleRes.data.map((r) => r.ruleID))
   } catch (err) {
     saveError.value = "Unable to load the dose schedule for this vaccine."
     doseSchedule.value = []
     originalDoseIds.value = new Set()
+    originalRuleIds.value = new Set()
   } finally {
     doseScheduleLoading.value = false
   }
@@ -178,15 +385,29 @@ function openCreate() {
     administrationRoute: "Intramuscular",
     status: true,
   }
-  doseSchedule.value = [{ doseID: 0, doseNumber: 1, minIntervalDays: 0 }]
+  doseSchedule.value = [{
+    doseID: 0,
+    ruleID: 0,
+    doseNumber: 1,
+    recommendedAgeDays: 0,
+    minimumAgeDays: 0,
+    intervalFromPreviousDoseDays: 0,
+    isRequired: true,
+    recommendedAgePreset: "At Birth",
+    recommendedAgeCustomValue: null,
+    recommendedAgeCustomUnit: "Days",
+  }]
   originalDoseIds.value = new Set()
+  originalRuleIds.value = new Set()
   doseScheduleLoading.value = false
+  hasServerValidationError.value = false
   showModal.value = true
 }
 
 function edit(v) {
   isEdit.value = true
   saveError.value = ""
+  hasServerValidationError.value = false
   form.value = { ...v }
   doseSchedule.value = []
   showModal.value = true
@@ -196,36 +417,70 @@ function edit(v) {
 
 async function save() {
   saveError.value = ""
+  hasServerValidationError.value = false
+  normalizeDoseSchedule()
+  if (hasScheduleErrors.value) {
+    saveError.value = "Please fix the highlighted dose schedule errors before saving."
+    return
+  }
   savingVaccine.value = true
   try {
     if (isEdit.value) {
       const vaccineID = form.value.vaccineID
       await axios.put(`${api}/${vaccineID}`, form.value)
 
-      // Diff dose schedule: delete removed, update existing, insert new
-      const currentIds = new Set(
+      // Diff VaccineDose rows: delete removed, update existing, insert new
+      const currentDoseIds = new Set(
         doseSchedule.value.filter((d) => d.doseID).map((d) => d.doseID)
       )
-      const toDelete = [...originalDoseIds.value].filter((id) => !currentIds.has(id))
+      const doseIdsToDelete = [...originalDoseIds.value].filter((id) => !currentDoseIds.has(id))
 
-      await Promise.all(toDelete.map((id) => axios.delete(`${doseApi}/${id}`)))
+      // Diff VaccinationScheduleRule rows: delete removed, update existing, insert new
+      const currentRuleIds = new Set(
+        doseSchedule.value.filter((d) => d.ruleID).map((d) => d.ruleID)
+      )
+      const ruleIdsToDelete = [...originalRuleIds.value].filter((id) => !currentRuleIds.has(id))
+
+      await Promise.all([
+        ...doseIdsToDelete.map((id) => axios.delete(`${doseApi}/${id}`)),
+        ...ruleIdsToDelete.map((id) => axios.delete(`${ruleApi}/${id}`)),
+      ])
 
       await Promise.all(
-        doseSchedule.value.map((d, idx) => {
+        doseSchedule.value.map(async (d, idx) => {
           const doseNumber = idx + 1
+
+          // VaccineDose (keeps its own minimal interval field for backward compatibility)
           if (d.doseID) {
-            return axios.put(`${doseApi}/${d.doseID}`, {
+            await axios.put(`${doseApi}/${d.doseID}`, {
               doseID: d.doseID,
               vaccineID,
               doseNumber,
-              minIntervalDays: d.minIntervalDays,
+              minIntervalDays: d.intervalFromPreviousDoseDays,
+            })
+          } else {
+            await axios.post(doseApi, {
+              vaccineID,
+              doseNumber,
+              minIntervalDays: d.intervalFromPreviousDoseDays,
             })
           }
-          return axios.post(doseApi, {
+
+          // VaccinationScheduleRule (separate table, separate record)
+          const rulePayload = {
             vaccineID,
             doseNumber,
-            minIntervalDays: d.minIntervalDays,
-          })
+            minimumAgeDays: d.minimumAgeDays,
+            recommendedAgeDays: d.recommendedAgeDays,
+            intervalFromPreviousDoseDays: d.intervalFromPreviousDoseDays,
+            sequenceOrder: doseNumber,
+            isRequired: d.isRequired,
+          }
+          if (d.ruleID) {
+            await axios.put(ruleApi, { ruleID: d.ruleID, ...rulePayload })
+          } else {
+            await axios.post(ruleApi, rulePayload)
+          }
         })
       )
     } else {
@@ -233,32 +488,45 @@ async function save() {
       const vaccineID = res.data.vaccineID ?? res.data.VaccineID
 
       await Promise.all(
-        doseSchedule.value.map((d, idx) =>
-          axios.post(doseApi, {
+        doseSchedule.value.map(async (d, idx) => {
+          const doseNumber = idx + 1
+
+          await axios.post(doseApi, {
             vaccineID,
-            doseNumber: idx + 1,
-            minIntervalDays: d.minIntervalDays,
+            doseNumber,
+            minIntervalDays: d.intervalFromPreviousDoseDays,
           })
-        )
+
+          await axios.post(ruleApi, {
+            vaccineID,
+            doseNumber,
+            minimumAgeDays: d.minimumAgeDays,
+            recommendedAgeDays: d.recommendedAgeDays,
+            intervalFromPreviousDoseDays: d.intervalFromPreviousDoseDays,
+            sequenceOrder: doseNumber,
+            isRequired: d.isRequired,
+          })
+        })
       )
     }
 
     showModal.value = false
     await Promise.all([load(), loadAllDoses()])
   } catch (err) {
-    saveError.value = "Unable to save this vaccine. Please check the details and try again."
+    const status = err?.response?.status
+    if (status === 400) {
+      saveError.value = "Please correct the highlighted fields."
+      hasServerValidationError.value = true
+    } else if (status && status >= 500) {
+      saveError.value = "Unexpected server error. Please try again."
+    } else {
+      saveError.value = "Unable to save this vaccine. Please check the details and try again."
+    }
   } finally {
     savingVaccine.value = false
   }
 }
 
-async function remove(id) {
-  if (!confirm("Delete vaccine?")) return
-  await axios.delete(`${api}/${id}`)
-  closeMenu()
-  closeDrawer()
-  await Promise.all([load(), loadAllDoses()])
-}
 </script>
 
 <template>
@@ -489,7 +757,6 @@ async function remove(id) {
                       <div class="my-1 border-t border-slate-100"></div>
                       <button v-if="!vaccine.status" @click="setStatus(vaccine, true)" class="w-full text-left px-3.5 py-2 text-sm text-emerald-700 hover:bg-emerald-50 transition-colors">Activate</button>
                       <button v-if="vaccine.status" @click="setStatus(vaccine, false)" class="w-full text-left px-3.5 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors">Deactivate</button>
-                      <button @click="remove(vaccine.vaccineID)" class="w-full text-left px-3.5 py-2 text-sm text-rose-600 hover:bg-rose-50 transition-colors">Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -633,12 +900,12 @@ async function remove(id) {
               </div>
             </div>
 
-            <!-- Dose Schedule builder -->
+            <!-- Dose Schedule builder (VaccineDose + VaccinationScheduleRule combined) -->
             <div>
               <div class="flex items-center justify-between mb-2">
                 <div>
                   <h3 class="text-sm font-bold text-slate-900">Dose Schedule</h3>
-                  <p class="text-xs text-slate-500">Dose numbers are automatic. Set the minimum interval before each dose can be given.</p>
+                  <p class="text-xs text-slate-500">Dose numbers, minimum age, and interval are calculated automatically from the visit you select.</p>
                 </div>
                 <button
                   type="button"
@@ -653,33 +920,82 @@ async function remove(id) {
                 Loading dose schedule…
               </div>
 
-              <div v-else class="space-y-2">
+              <div v-else class="space-y-3">
                 <div
                   v-for="(dose, index) in doseSchedule"
-                  :key="dose.doseID ? 'd-' + dose.doseID : 'new-' + index"
-                  class="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3"
+                  :key="dose.doseID ? 'd-' + dose.doseID : (dose.ruleID ? 'r-' + dose.ruleID : 'new-' + index)"
+                  class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3"
                 >
-                  <div class="w-16 shrink-0">
-                    <p class="text-xs font-semibold text-slate-500">Dose</p>
-                    <p class="text-sm font-bold text-slate-900">{{ index + 1 }}</p>
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <p class="text-xs font-semibold text-slate-500">Dose</p>
+                      <p class="text-sm font-bold text-slate-900">{{ index + 1 }}</p>
+                    </div>
+                    <button
+                      type="button"
+                      @click="removeDoseRow(index)"
+                      class="shrink-0 text-rose-500 hover:bg-rose-50 rounded-lg w-8 h-8 flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                      title="Remove dose"
+                    >
+                      ✕
+                    </button>
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <label class="block text-xs font-semibold text-slate-500 mb-1">Minimum Interval (days)</label>
-                    <input
-                      v-model.number="dose.minIntervalDays"
-                      type="number"
-                      min="0"
-                      class="w-full text-sm rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
-                    />
+
+                  <!-- Recommended Visit -->
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">
+                      Recommended Visit <span class="text-rose-500">*</span>
+                    </label>
+                    <select
+                      v-model="dose.recommendedAgePreset"
+                      @change="onAgePresetChange(dose, index)"
+                      :class="[
+                        'w-full text-sm rounded-lg border bg-white px-3 py-2 focus:outline-none focus:ring-2 transition-colors',
+                        (doseVisitError(index) || hasServerValidationError)
+                          ? 'border-rose-400 focus:ring-rose-400'
+                          : 'border-slate-200 focus:ring-emerald-500',
+                      ]"
+                    >
+                      <option v-if="!dose.recommendedAgePreset" value="" disabled>Select a visit…</option>
+                      <option v-for="preset in availablePresetsForIndex(index)" :key="preset" :value="preset">{{ preset }}</option>
+                    </select>
+
+                    <div v-if="dose.recommendedAgePreset === CUSTOM_OPTION" class="flex gap-2 mt-2">
+                      <input
+                        v-model.number="dose.recommendedAgeCustomValue"
+                        @input="onAgeCustomChange(dose, index)"
+                        type="number"
+                        min="0"
+                        placeholder="Value"
+                        :class="[
+                          'w-1/2 text-sm rounded-lg border bg-white px-3 py-2 focus:outline-none focus:ring-2 transition-colors',
+                          (doseVisitError(index) || hasServerValidationError)
+                            ? 'border-rose-400 focus:ring-rose-400'
+                            : 'border-slate-200 focus:ring-emerald-500',
+                        ]"
+                      />
+                      <select
+                        v-model="dose.recommendedAgeCustomUnit"
+                        @change="onAgeCustomChange(dose, index)"
+                        class="w-1/2 text-sm rounded-lg border border-slate-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
+                      >
+                        <option v-for="unit in ageUnitOptions" :key="unit" :value="unit">{{ unit }}</option>
+                      </select>
+                    </div>
+
+                    <p v-if="doseVisitError(index)" class="text-[11px] font-medium text-rose-600 mt-1">{{ doseVisitError(index) }}</p>
+
+                    <!-- Read-only, auto-derived summary: never user-editable -->
+                    <p v-else-if="dose.recommendedAgeDays !== null && dose.recommendedAgeDays !== undefined" class="text-[11px] text-slate-400 mt-1">
+                      {{ dose.recommendedAgeDays }} day(s) old
+                      <template v-if="index > 0">• Interval from previous dose: {{ dose.intervalFromPreviousDoseDays }} day(s)</template>
+                    </p>
                   </div>
-                  <button
-                    type="button"
-                    @click="removeDoseRow(index)"
-                    class="shrink-0 text-rose-500 hover:bg-rose-50 rounded-lg w-8 h-8 flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
-                    title="Remove dose"
-                  >
-                    ✕
-                  </button>
+
+                  <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                    <input type="checkbox" v-model="dose.isRequired" class="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
+                    Required
+                  </label>
                 </div>
 
                 <p v-if="doseSchedule.length === 0" class="text-sm text-slate-400 bg-slate-50 rounded-lg px-4 py-8 text-center">
@@ -693,7 +1009,7 @@ async function remove(id) {
             <button @click="showModal = false" :disabled="savingVaccine" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40">Cancel</button>
             <button
               @click="save"
-              :disabled="savingVaccine || doseScheduleLoading"
+              :disabled="savingVaccine || doseScheduleLoading || hasScheduleErrors"
               class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
             >
               {{ savingVaccine ? 'Saving…' : 'Save Vaccine' }}

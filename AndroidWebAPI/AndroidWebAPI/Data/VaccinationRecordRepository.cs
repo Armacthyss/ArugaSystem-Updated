@@ -12,6 +12,7 @@ namespace AndroidWebAPI.Data.Repositories
             _context = context;
         }
 
+
         public async Task<IEnumerable<VaccinationRecord>> GetAllAsync()
         {
             return await _context.VaccinationRecords
@@ -20,6 +21,8 @@ namespace AndroidWebAPI.Data.Repositories
                 .Include(r => r.Inventory)
                 .ToListAsync();
         }
+     
+
 
         public async Task<VaccinationRecord?> GetByIdAsync(Guid vaccinationRecordId)
         {
@@ -65,5 +68,61 @@ namespace AndroidWebAPI.Data.Repositories
                 r.VaccineID == vaccineId &&
                 r.DoseNumber == doseNumber);
         }
+        
+
+        public async Task RecordVaccinationAsync(VaccinationRecord record)
+{
+    await using var transaction = await _context.Database.BeginTransactionAsync();
+
+    try
+    {
+        // Prevent duplicate vaccination
+        if (await AlreadyVaccinatedAsync(record.ChildID, record.VaccineID, record.DoseNumber))
+            throw new Exception("This vaccine dose has already been administered.");
+
+        // Check inventory
+        var inventory = await _context.VaccineInventory
+            .FirstOrDefaultAsync(i => i.InventoryID == record.InventoryID);
+
+        if (inventory == null)
+            throw new Exception("Vaccine inventory not found.");
+
+        if (inventory.CurrentQuantity <= 0)
+            throw new Exception("No vaccine stock remaining.");
+
+        // Deduct stock
+        inventory.CurrentQuantity--;
+
+        // Save vaccination record
+        record.VaccinationRecordID = Guid.NewGuid();
+        record.CreatedAt = DateTime.UtcNow;
+
+        await _context.VaccinationRecords.AddAsync(record);
+
+        // Find corresponding timeline
+        var timeline = await _context.VaccinationTimelines
+    .FirstOrDefaultAsync(t =>
+        t.ChildID == record.ChildID &&
+        t.VaccineID == record.VaccineID &&
+        t.DoseNumber == record.DoseNumber &&
+        t.Status == "Pending");
+
+        if (timeline != null)
+        {
+            timeline.Status = "Completed";
+            timeline.VaccinationRecordID = record.VaccinationRecordID;
+            timeline.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
+    }
+    catch
+    {
+        await transaction.RollbackAsync();
+        throw;
+    }
+}
+
     }
 }

@@ -34,6 +34,7 @@ import SystemAdminNotification from '@/components/SystemAdmin/SysAd-Notification
 import SystemAdminReports from '@/components/SystemAdmin/SysAd-Reports.vue';
 import SystemAuditlogs from '@/components/SystemAdmin/SysAd-Auditlogs.vue';
 import TestAPI from '@/components/SystemAdmin/TestAPI.vue';
+import VaccineSchedule from '@/components/SystemAdmin/VaccineSchedule.vue';
 
 // ── Staff (Second version) ──────────────────────────────────
 import StaffDashboard from '@/components/Staff/StaffDashboard.vue';
@@ -73,7 +74,7 @@ const routes = [
   {path: '/system-admin/reports', component: SystemAdminReports},
   {path: '/system-admin/audit-logs', component: SystemAuditlogs},
   {path: '/system-admin/test-api', component: TestAPI},
-
+  {path: '/system-admin/vaccine-schedule', component: VaccineSchedule},
   // ── Staff (Second version) ──────────────────────────────────
   {path: '/staff/dashboard', component: StaffDashboard},
   {path: '/staff/patient-records', component: StaffPatientRecords},

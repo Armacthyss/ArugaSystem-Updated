@@ -14,11 +14,15 @@ namespace AndroidWebAPI.Data
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<User> Users { get; set; }
         public DbSet<VaccinationRecord> VaccinationRecords { get; set; }
+        public DbSet<VaccinationTimeline> VaccinationTimelines { get; set; }
+
+        public DbSet<VaccinationScheduleRule> VaccinationScheduleRules { get; set; }
         public DbSet<Vaccine> Vaccines { get; set; }
         public DbSet<VaccineDose> VaccineDoses { get; set; }
         public DbSet<VaccineInventory> VaccineInventory { get; set; }
         
         public DbSet<ChildParentRelationship> ChildParentRelationships { get; set; }
+     
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -38,7 +42,13 @@ namespace AndroidWebAPI.Data
             });
 
             modelBuilder.Entity<VaccinationRecord>()
-                .HasKey(v => v.RecordID);
+                .HasKey(v => v.VaccinationRecordID);
+            modelBuilder.Entity<VaccinationTimeline>()
+                .HasKey(v => v.TimelineID);
+
+            modelBuilder.Entity<VaccinationScheduleRule>()
+                .HasKey(v => v.RuleID);
+
 
             modelBuilder.Entity<Vaccine>()
                 .HasKey(v => v.VaccineID);

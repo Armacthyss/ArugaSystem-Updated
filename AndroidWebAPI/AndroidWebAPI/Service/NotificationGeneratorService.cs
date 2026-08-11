@@ -271,10 +271,10 @@ if (primaryParent == null)
 
             DateTime scheduled;
 
-            if (administered?.DateAdministered != null)
+            if (administered?.VaccinationDate != null)
             {
                 // ✅ Use ACTUAL date — cascades correctly to next dose
-                scheduled = administered.DateAdministered.Value;
+                scheduled = administered.VaccinationDate;
             }
             else
             {

@@ -83,18 +83,6 @@ namespace AndroidWebAPI.Controllers
         // DELETE
         // DELETE: api/Vaccines/{id}
         // ===========================================
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> Delete(int id)
-        {
-            var success = await _repository.DeleteAsync(id);
-
-            if (!success)
-                return NotFound();
-
-            return Ok(new
-            {
-                message = "Vaccine deleted successfully."
-            });
-        }
+      
     }
 }

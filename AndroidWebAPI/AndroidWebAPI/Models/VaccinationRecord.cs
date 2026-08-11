@@ -1,35 +1,54 @@
-// Models/VaccinationRecord.cs
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace AndroidWebAPI.Models
 {
+    [Table("VaccinationRecords")]
     public class VaccinationRecord
     {
         [Key]
-        public Guid RecordID { get; set; }
+        public Guid VaccinationRecordID { get; set; }
 
-        [Required]
         public Guid ChildID { get; set; }
 
-        [Required]
         public int VaccineID { get; set; }
 
-        [Required]
+        public int InventoryID { get; set; }
+
         public int DoseNumber { get; set; }
 
-        // Nullable — DB allows NULL for unscheduled/pending records
-        public DateTime? DateAdministered { get; set; }
+        public DateTime VaccinationDate { get; set; }
 
-        // All string columns must be nullable (?) because DB has NULL rows
-        public Guid? AdministeredBy { get; set; }
-        public string? AdministeredByName { get; set; }
-        public string? LotNumber { get; set; }
-        public string? Status { get; set; }
-        public string? Remarks { get; set; }
+        public Guid AdministeredByUserID { get; set; }
 
-        // These columns exist in your DB — add them so the model matches exactly
-        public DateTime? ScheduledDate { get; set; }
+        public string? NurseObservation { get; set; }
+
+        public string? DoctorDiagnosis { get; set; }
+
+        public DateTime? DoctorDiagnosedAt { get; set; }
+
+        // Completed / Cancelled / Deferred
+        public string Status { get; set; } = "Completed";
+
+        public DateTime CreatedAt { get; set; }
+
+        public DateTime? UpdatedAt { get; set; }
+
+        //------------------------------------
+        // Navigation Properties
+        //------------------------------------
+
+        [ForeignKey(nameof(ChildID))]
+        public virtual Child Child { get; set; }
+
+        [ForeignKey(nameof(VaccineID))]
+        public virtual Vaccine Vaccine { get; set; }
+
+        [ForeignKey(nameof(InventoryID))]
+        public virtual VaccineInventory Inventory { get; set; }
+
+        [ForeignKey(nameof(AdministeredByUserID))]
+        public virtual Personnel AdministeredBy { get; set; }
     }
 }
