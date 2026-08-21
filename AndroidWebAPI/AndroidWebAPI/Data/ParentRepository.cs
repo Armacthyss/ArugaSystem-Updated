@@ -12,59 +12,152 @@ namespace AndroidWebAPI.Data
         private readonly string _connectionString = configuration.GetConnectionString("DefaultConnection");
 
         // ── Login ─────────────────────────────────────────────────
+
         public async Task<Parent?> LoginAsync(string email, string password)
 {
     using IDbConnection connection = new SqlConnection(_connectionString);
 
     string query = @"
-    SELECT
-        ParentID,
-        FirstName,
-        MiddleName,
-        LastName,
-        Email,
-        Password,
-        ContactNo,
-        BarangayNo,
-        Address
-    FROM dbo.Parents
-    WHERE Email = @Email
-      AND Password = @Password";
+        SELECT
+            ParentID,
+            FirstName,
+            MiddleName,
+            LastName,
+            Email,
+            PasswordHash,
+            ContactNo,
+            BarangayNo,
+            Address,
+            MustChangePassword,
+            TemporaryPasswordExpiresAt,
+            LastLogin
+        FROM dbo.Parents
+        WHERE Email = @Email";
 
-    return await connection.QueryFirstOrDefaultAsync<Parent>(
+    var parent = await connection.QueryFirstOrDefaultAsync<Parent>(
         query,
-        new
-        {
-            Email = email,
-            Password = password
-        });
+        new { Email = email }
+    );
+
+    if (parent == null)
+        return null;
+
+    if (string.IsNullOrEmpty(parent.PasswordHash))
+        return null;
+
+    bool passwordValid = BCrypt.Net.BCrypt.Verify(
+        password,
+        parent.PasswordHash
+    );
+
+    if (!passwordValid)
+        return null;
+        if (parent.MustChangePassword &&
+    parent.TemporaryPasswordExpiresAt.HasValue &&
+    parent.TemporaryPasswordExpiresAt.Value < DateTime.Now)
+{
+    return null;
+}
+
+    // Record successful login
+    await connection.ExecuteAsync(
+        @"
+        UPDATE dbo.Parents
+        SET LastLogin = GETDATE()
+        WHERE ParentID = @ParentID",
+        new { parent.ParentID }
+    );
+
+    parent.LastLogin = DateTime.Now;
+
+
+    return parent;
 }
    
         // ── Change Password ───────────────────────────────────────
-        public async Task<bool> ChangePasswordAsync(Guid parentId, string currentPassword, string newPassword)
+
+        public async Task<(bool Success, string Message)> ChangePasswordAsync(
+    Guid parentId,
+    string currentPassword,
+    string newPassword)
+{
+    using IDbConnection connection =
+        new SqlConnection(_connectionString);
+
+    var parent = await connection.QueryFirstOrDefaultAsync<Parent>(
+        @"
+        SELECT
+            ParentID,
+            PasswordHash,
+            MustChangePassword,
+            TemporaryPasswordExpiresAt
+        FROM dbo.Parents
+        WHERE ParentID = @ParentID
+        ",
+        new { ParentID = parentId }
+    );
+
+    if (parent == null)
+        return (false, "Parent account not found.");
+
+    if (string.IsNullOrWhiteSpace(parent.PasswordHash))
+        return (false, "Account does not have a valid password.");
+
+    // Check temporary password expiration
+    if (parent.MustChangePassword &&
+        parent.TemporaryPasswordExpiresAt.HasValue &&
+        parent.TemporaryPasswordExpiresAt.Value < DateTime.Now)
+    {
+        return (false, "Temporary password has expired. Please request a new password.");
+    }
+
+    // Verify current password
+    bool currentPasswordValid =
+        BCrypt.Net.BCrypt.Verify(
+            currentPassword,
+            parent.PasswordHash
+        );
+
+    if (!currentPasswordValid)
+        return (false, "Current password is incorrect.");
+
+    // Basic new password validation
+    if (string.IsNullOrWhiteSpace(newPassword))
+        return (false, "New password is required.");
+
+    if (newPassword.Length < 8)
+        return (false, "New password must be at least 8 characters.");
+
+    // Prevent using the same password
+    if (BCrypt.Net.BCrypt.Verify(newPassword, parent.PasswordHash))
+        return (false, "New password must be different from your current password.");
+
+    string newPasswordHash =
+        BCrypt.Net.BCrypt.HashPassword(newPassword);
+
+    int rows = await connection.ExecuteAsync(
+        @"
+        UPDATE dbo.Parents
+        SET
+            PasswordHash = @PasswordHash,
+            MustChangePassword = 0,
+            TemporaryPasswordExpiresAt = NULL,
+            UpdatedAt = GETDATE()
+        WHERE ParentID = @ParentID
+        ",
+        new
         {
-            using IDbConnection connection = new SqlConnection(_connectionString);
-
-            // Check current password matches
-            var row = await connection.QueryFirstOrDefaultAsync<dynamic>(
-                "SELECT Password FROM dbo.Parents WHERE ParentID = @ParentID",
-                new { ParentID = parentId }
-            );
-
-            if (row == null) return false;
-
-            // Plain text check — swap for BCrypt.Verify() in production
-            string storedPassword = row.Password;
-            if (storedPassword != currentPassword) return false;
-
-            // Update to new password
-            await connection.ExecuteAsync(
-                "UPDATE dbo.Parents SET Password = @NewPassword WHERE ParentID = @ParentID",
-                new { NewPassword = newPassword, ParentID = parentId }
-            );
-
-            return true;
+            PasswordHash = newPasswordHash,
+            ParentID = parentId
         }
+    );
+
+    if (rows == 0)
+        return (false, "Failed to update password.");
+
+    return (true, "Password updated successfully.");
+}
+
 
         // ── Dashboard ─────────────────────────────────────────────
         public async Task<dynamic> GetDashboardData(Guid parentId)
@@ -80,45 +173,50 @@ namespace AndroidWebAPI.Data
 
             return await connection.QueryAsync<dynamic>(sql, new { Id = parentId });
         }
-
 public async Task<Parent> CreateAsync(Parent parent)
 {
     using IDbConnection connection = new SqlConnection(_connectionString);
 
     string sql = @"
-    INSERT INTO Parents
-    (
-        ParentID,
-        FirstName,
-        MiddleName,
-        LastName,
-        Email,
-        ContactNo,
-        BarangayNo,
-        Address,
-        Password,
-        CreatedAt,
-        UpdatedAt
-    )
-    VALUES
-    (
-        @ParentID,
-        @FirstName,
-        @MiddleName,
-        @LastName,
-        @Email,
-        @ContactNo,
-        @BarangayNo,
-        @Address,
-        @Password,
-        GETDATE(),
-        GETDATE()
-    )";
+        INSERT INTO Parents
+        (
+            ParentID,
+            FirstName,
+            MiddleName,
+            LastName,
+            Email,
+            ContactNo,
+            BarangayNo,
+            Address,
+            PasswordHash,
+            MustChangePassword,
+            TemporaryPasswordExpiresAt,
+            CreatedAt,
+            UpdatedAt
+        )
+        VALUES
+        (
+            @ParentID,
+            @FirstName,
+            @MiddleName,
+            @LastName,
+            @Email,
+            @ContactNo,
+            @BarangayNo,
+            @Address,
+            @PasswordHash,
+            @MustChangePassword,
+            @TemporaryPasswordExpiresAt,
+            GETDATE(),
+            GETDATE()
+        )";
 
     await connection.ExecuteAsync(sql, parent);
 
     return parent;
 }
+
+
 public async Task<Parent?> GetByIdAsync(Guid id)
 {
     using IDbConnection connection = new SqlConnection(_connectionString);
@@ -176,6 +274,5 @@ public async Task<bool> DeleteAsync(Guid id)
 
     return rows > 0;
 }
-
     }
 }

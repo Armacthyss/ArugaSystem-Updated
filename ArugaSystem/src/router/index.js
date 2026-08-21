@@ -1,10 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
 // ── Existing imports (unchanged) ─────────────────────────────
+import ChangePassword from '@/components/Login/ChangePassword.vue';
 
 import Login        from '@/components/Login/Login.vue';
-import StaffLogin   from '@/components/Login/StaffLogin.vue';
-import Admin        from '@/components/Login/Admin.vue';
 import ParentHome   from '@/components/ParentViews/ParentHomepage.vue';
 import AdminHomepage from '@/components/Admin/AdminHomepage.vue';
 
@@ -35,6 +34,7 @@ import SystemAdminReports from '@/components/SystemAdmin/SysAd-Reports.vue';
 import SystemAuditlogs from '@/components/SystemAdmin/SysAd-Auditlogs.vue';
 import TestAPI from '@/components/SystemAdmin/TestAPI.vue';
 import VaccineSchedule from '@/components/SystemAdmin/VaccineSchedule.vue';
+import SystemOperatingHours from '@/components/SystemAdmin/SysAd-Operating_hours.vue';
 
 // ── Staff (Second version) ──────────────────────────────────
 import StaffDashboard from '@/components/Staff/StaffDashboard.vue';
@@ -44,8 +44,6 @@ import StaffVaccineSchedule from '@/components/Staff/StaffVaccineSchedule.vue';
 const routes = [
   // ── Old routes (keep exactly as they were) ─────────────────
  { path: '/',       component: Login        },
-  { path: '/StaffLogin',  component: StaffLogin   },
-  { path: '/admin-login', component: Admin        },
   { path: '/ParentHome',  component: ParentHome   },
   { path: '/AdminHome',   component: AdminHomepage },
 
@@ -75,10 +73,16 @@ const routes = [
   {path: '/system-admin/audit-logs', component: SystemAuditlogs},
   {path: '/system-admin/test-api', component: TestAPI},
   {path: '/system-admin/vaccine-schedule', component: VaccineSchedule},
+  {path: '/system-admin/operating-hours', component: SystemOperatingHours},
+  
   // ── Staff (Second version) ──────────────────────────────────
   {path: '/staff/dashboard', component: StaffDashboard},
   {path: '/staff/patient-records', component: StaffPatientRecords},
   {path: '/staff/vaccine-schedule', component: StaffVaccineSchedule},
+
+  //testPage
+  {path: '/ChangePassword', component: ChangePassword},
+
 ]
 
 const router = createRouter({

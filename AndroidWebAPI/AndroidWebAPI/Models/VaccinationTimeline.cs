@@ -10,6 +10,8 @@ namespace AndroidWebAPI.Models
         [Key]
         public Guid TimelineID { get; set; }
 
+        public string TimelineCode { get; set; } = string.Empty;
+
         public Guid ChildID { get; set; }
 
         public int VaccineID { get; set; }

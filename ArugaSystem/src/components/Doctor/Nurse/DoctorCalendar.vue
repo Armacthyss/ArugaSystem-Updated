@@ -289,7 +289,7 @@ const route  = useRoute()
 const doctor = ref({ userId: '', fullName: '', userType: '' })
 onMounted(async () => {
   const stored = localStorage.getItem('aruga_user')
-  if (!stored) { router.push('/login'); return }
+  if (!stored) { router.push('/'); return }
   const u = JSON.parse(stored)
   doctor.value = {
     userId:   u.userID  ?? u.UserID,

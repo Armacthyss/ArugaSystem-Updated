@@ -1,4 +1,5 @@
 using AndroidWebAPI.Models;
+using AndroidWebAPI.DTOs;
 
 namespace AndroidWebAPI.Data
 {
@@ -6,7 +7,7 @@ namespace AndroidWebAPI.Data
     {
         Task<IEnumerable<VaccinationRecord>> GetAllAsync();
         Task<VaccinationRecord?> GetByIdAsync(Guid vaccinationRecordId);
-        Task<IEnumerable<VaccinationRecord>> GetByChildAsync(Guid childId);
+       Task<IEnumerable<VaccinationRecordResponseDto>> GetByChildAsync(Guid childId);
 
         Task AddAsync(VaccinationRecord record);
         Task UpdateAsync(VaccinationRecord record);
@@ -17,5 +18,7 @@ namespace AndroidWebAPI.Data
    // Business Logic
 Task RecordVaccinationAsync(VaccinationRecord record);
    
+    Task RecordHistoricalVaccinationsAsync(
+    HistoricalVaccinationSubmissionDto submission);
     }
 }

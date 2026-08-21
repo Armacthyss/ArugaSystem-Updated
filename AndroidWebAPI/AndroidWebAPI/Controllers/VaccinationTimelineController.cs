@@ -100,5 +100,16 @@ public async Task<IActionResult> GetSummary(Guid childId)
     var summary = await _repository.GetTimelineSummaryAsync(childId);
     return Ok(summary);
 }
+
+[HttpPut("update-missed")]
+public async Task<IActionResult> UpdateMissed()
+{
+    await _repository.UpdateMissedVaccinationsAsync();
+
+    return Ok(new
+    {
+        message = "Missed vaccinations updated successfully."
+    });
+}
     }
 }

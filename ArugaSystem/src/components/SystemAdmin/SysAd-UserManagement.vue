@@ -1,5 +1,8 @@
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, onMounted } from 'vue'
+import axios from 'axios'
+
+const API_BASE_URL = 'http://localhost:57147/api'
 
 /* ----------------------------- Sidebar state ------------------------------ */
 const isCollapsed = ref(false)
@@ -18,30 +21,67 @@ const navItems = [
 const activeNav = ref('User Management')
 
 /* -------------------------------- Role meta -------------------------------- */
+// Matches the backend's actual roles. "Parent" comes from AccountType = Parent,
+// the rest come from Users.UserType for AccountType = Personnel.
 const roleMeta = {
   Parent: { tint: 'bg-teal-50', text: 'text-teal-700' },
-  Staff: { tint: 'bg-blue-50', text: 'text-blue-700' },
-  Healthworker: { tint: 'bg-emerald-50', text: 'text-emerald-700' },
-  'System Admin': { tint: 'bg-amber-50', text: 'text-amber-700' },
+  Doctor: { tint: 'bg-emerald-50', text: 'text-emerald-700' },
+  Nurse: { tint: 'bg-sky-50', text: 'text-sky-700' },
+  Staff: { tint: 'bg-amber-50', text: 'text-amber-700' },
 }
 
 const statusMeta = {
   Active: { tint: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
   Inactive: { tint: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400' },
-  Archived: { tint: 'bg-rose-50', text: 'text-rose-600', dot: 'bg-rose-500' },
 }
 
 /* -------------------------------- User data -------------------------------- */
-const users = ref([
-  { id: 1, firstName: 'Elena', lastName: 'Cruz', username: 'ecruz', email: 'elena.cruz@aruga.health', contact: '+63 917 200 1145', role: 'Healthworker', status: 'Active', lastLogin: 'Today, 9:41 AM', created: 'Jan 14, 2025' },
-  { id: 2, firstName: 'Renzo', lastName: 'Miguel', username: 'rmiguel', email: 'renzo.miguel@aruga.health', contact: '+63 917 322 5590', role: 'System Admin', status: 'Active', lastLogin: 'Today, 8:05 AM', created: 'Nov 02, 2024' },
-  { id: 3, firstName: 'Bea', lastName: 'Fernandez', username: 'bfernandez', email: 'bea.fernandez@aruga.health', contact: '+63 918 774 2201', role: 'Healthworker', status: 'Active', lastLogin: 'Yesterday, 4:18 PM', created: 'Feb 20, 2025' },
-  { id: 4, firstName: 'Marites', lastName: 'Santos', username: 'msantos', email: 'marites.santos@gmail.com', contact: '+63 920 441 8832', role: 'Parent', status: 'Active', lastLogin: '2 days ago', created: 'Mar 08, 2025' },
-  { id: 5, firstName: 'Jhun', lastName: 'Aquino', username: 'jaquino', email: 'jhun.aquino@aruga.health', contact: '+63 917 663 0072', role: 'Staff', status: 'Inactive', lastLogin: '3 weeks ago', created: 'Aug 19, 2024' },
-  { id: 6, firstName: 'Liza', lastName: 'Domingo', username: 'ldomingo', email: 'liza.domingo@gmail.com', contact: '+63 919 205 6671', role: 'Parent', status: 'Active', lastLogin: '5 hrs ago', created: 'Apr 30, 2025' },
-  { id: 7, firstName: 'Carlo', lastName: 'Reyes', username: 'creyes', email: 'carlo.reyes@aruga.health', contact: '+63 917 880 4432', role: 'Staff', status: 'Archived', lastLogin: '4 months ago', created: 'May 11, 2023' },
-  { id: 8, firstName: 'Angeli', lastName: 'Torres', username: 'atorres', email: 'angeli.torres@gmail.com', contact: '+63 921 336 9081', role: 'Parent', status: 'Inactive', lastLogin: '1 month ago', created: 'Jun 25, 2025' },
-])
+const users = ref([])
+const isLoadingUsers = ref(false)
+const loadError = ref('')
+
+function formatDate(value) {
+  if (!value) return 'Never'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return 'Never'
+  return d.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit'
+  })
+}
+
+function mapAccount(a) {
+  return {
+    id: a.accountID,
+    firstName: a.firstName || '',
+    lastName: a.lastName || '',
+    username: a.username || '',
+    email: a.email || '—',
+    contact: a.contactNo || '—',
+    role: a.role,
+    status: a.status, // "Active" | "Inactive" from the API
+    mustChangePassword: !!a.mustChangePassword,
+    lastLogin: formatDate(a.lastLogin),
+    created: formatDate(a.createdAt),
+  }
+}
+
+async function fetchUsers() {
+  isLoadingUsers.value = true
+  loadError.value = ''
+
+  try {
+    const response = await axios.get(`${API_BASE_URL}/accounts`)
+    users.value = response.data.map(mapAccount)
+  } catch (error) {
+    console.error('Failed to load accounts:', error)
+    loadError.value = 'Could not load users. Is the API running?'
+  } finally {
+    isLoadingUsers.value = false
+  }
+}
+
+onMounted(fetchUsers)
 
 /* ---------------------------- Toolbar / filters ---------------------------- */
 const searchQuery = ref('')
@@ -67,7 +107,7 @@ const summary = computed(() => ({
   total: users.value.length,
   active: users.value.filter((u) => u.status === 'Active').length,
   inactive: users.value.filter((u) => u.status === 'Inactive').length,
-  archived: users.value.filter((u) => u.status === 'Archived').length,
+  pendingPasswordChange: users.value.filter((u) => u.mustChangePassword).length,
 }))
 
 const initials = (u) => `${u.firstName[0] ?? ''}${u.lastName[0] ?? ''}`.toUpperCase()
@@ -77,9 +117,51 @@ const openMenuId = ref(null)
 const toggleMenu = (id) => (openMenuId.value = openMenuId.value === id ? null : id)
 const closeMenu = () => (openMenuId.value = null)
 
-const setStatus = (user, status) => {
-  user.status = status
+const actionError = ref('')
+
+async function setStatus(user, status) {
   closeMenu()
+  actionError.value = ''
+
+  const confirmed = window.confirm(
+    status === 'Active'
+      ? `Activate ${user.firstName} ${user.lastName}?`
+      : `Deactivate ${user.firstName} ${user.lastName}? They won't be able to log in.`
+  )
+  if (!confirmed) return
+
+  try {
+    await axios.patch(`${API_BASE_URL}/accounts/${user.id}/status`, {
+      status: status === 'Active'
+    })
+    user.status = status
+  } catch (error) {
+    console.error('Failed to update status:', error)
+    actionError.value = 'Could not update this user\u2019s status. Please try again.'
+  }
+}
+
+async function resetPassword(user) {
+  closeMenu()
+  actionError.value = ''
+
+  const confirmed = window.confirm(
+    `Reset the password for ${user.firstName} ${user.lastName}? They'll need to set a new one on next login.`
+  )
+  if (!confirmed) return
+
+  try {
+    const response = await axios.post(`${API_BASE_URL}/accounts/${user.id}/reset-password`)
+    user.mustChangePassword = true
+    tempPasswordResult.value = {
+      name: `${user.firstName} ${user.lastName}`,
+      password: response.data.temporaryPassword,
+    }
+    showTempPasswordModal.value = true
+  } catch (error) {
+    console.error('Failed to reset password:', error)
+    actionError.value = 'Could not reset this user\u2019s password. Please try again.'
+  }
 }
 
 /* -------------------------------- Details drawer ---------------------------- */
@@ -92,49 +174,124 @@ const openDrawer = (user) => {
 }
 const closeDrawer = () => (showDrawer.value = false)
 
+/* ------------------------- Temporary password modal ------------------------- */
+const showTempPasswordModal = ref(false)
+const tempPasswordResult = ref(null) // { name, password }
+const copyStatus = ref('')
+
+async function copyTempPassword() {
+  if (!tempPasswordResult.value) return
+  try {
+    await navigator.clipboard.writeText(tempPasswordResult.value.password)
+    copyStatus.value = 'Copied!'
+    setTimeout(() => (copyStatus.value = ''), 1500)
+  } catch {
+    copyStatus.value = 'Could not copy — please select it manually.'
+  }
+}
+
+function closeTempPasswordModal() {
+  showTempPasswordModal.value = false
+  tempPasswordResult.value = null
+  copyStatus.value = ''
+}
+
 /* --------------------------------- Add modal --------------------------------- */
 const showAddModal = ref(false)
+const isCreating = ref(false)
+const createError = ref('')
+
 const addForm = reactive({
   role: 'Parent',
   firstName: '',
+  middleName: '',
   lastName: '',
-  username: '',
+  username: '',      // Doctor / Nurse / Staff only
+  licenseNumber: '', // Doctor / Nurse only
   email: '',
-  password: '',
-  confirmPassword: '',
+  contactNo: '',
+  address: '',
+  barangayNo: '',    // Parent only
 })
+
+const isPersonnelRole = computed(() => addForm.role !== 'Parent')
+const showLicenseField = computed(() => addForm.role === 'Doctor' || addForm.role === 'Nurse')
+
 const openAddModal = () => {
-  Object.assign(addForm, { role: 'Parent', firstName: '', lastName: '', username: '', email: '', password: '', confirmPassword: '' })
+  Object.assign(addForm, {
+    role: 'Parent', firstName: '', middleName: '', lastName: '',
+    username: '', licenseNumber: '', email: '', contactNo: '',
+    address: '', barangayNo: '',
+  })
+  createError.value = ''
   showAddModal.value = true
 }
-const createUser = () => {
-  users.value.unshift({
-    id: Date.now(),
-    firstName: addForm.firstName || 'New',
-    lastName: addForm.lastName || 'User',
-    username: addForm.username || 'newuser',
-    email: addForm.email,
-    contact: '—',
-    role: addForm.role,
-    status: 'Active',
-    lastLogin: 'Never',
-    created: 'Today',
-  })
-  showAddModal.value = false
-}
 
-/* --------------------------------- Edit modal --------------------------------- */
-const showEditModal = ref(false)
-const editForm = reactive({ id: null, role: '', firstName: '', lastName: '', username: '', email: '' })
-const openEditModal = (user) => {
-  Object.assign(editForm, { id: user.id, role: user.role, firstName: user.firstName, lastName: user.lastName, username: user.username, email: user.email })
-  showEditModal.value = true
-  closeMenu()
-}
-const saveEdit = () => {
-  const u = users.value.find((x) => x.id === editForm.id)
-  if (u) Object.assign(u, editForm)
-  showEditModal.value = false
+const canCreate = computed(() => {
+  if (!addForm.firstName.trim() || !addForm.lastName.trim()) return false
+  if (!addForm.email.trim() || !addForm.contactNo.trim()) return false
+  if (isPersonnelRole.value && !addForm.username.trim()) return false
+  return true
+})
+
+async function createUser() {
+  createError.value = ''
+
+  if (!canCreate.value) {
+    createError.value = 'Please fill in all required fields.'
+    return
+  }
+
+  isCreating.value = true
+
+  try {
+    let temporaryPassword = ''
+    let createdName = `${addForm.firstName} ${addForm.lastName}`
+
+    if (addForm.role === 'Parent') {
+      const response = await axios.post(`${API_BASE_URL}/Parents`, {
+        firstName: addForm.firstName,
+        middleName: addForm.middleName || null,
+        lastName: addForm.lastName,
+        email: addForm.email,
+        contactNo: addForm.contactNo,
+        barangayNo: addForm.barangayNo || null,
+        address: addForm.address || null,
+      })
+      temporaryPassword = response.data.temporaryPassword
+    } else {
+      const response = await axios.post(`${API_BASE_URL}/accounts/personnel`, {
+        firstName: addForm.firstName,
+        middleName: addForm.middleName || null,
+        lastName: addForm.lastName,
+        username: addForm.username,
+        role: addForm.role,
+        licenseNumber: showLicenseField.value ? (addForm.licenseNumber || null) : null,
+        email: addForm.email,
+        contactNo: addForm.contactNo,
+        address: addForm.address || null,
+      })
+      temporaryPassword = response.data.temporaryPassword
+    }
+
+    showAddModal.value = false
+    await fetchUsers()
+
+    tempPasswordResult.value = { name: createdName, password: temporaryPassword }
+    showTempPasswordModal.value = true
+
+  } catch (error) {
+    console.error('Failed to create user:', error)
+    if (error.response?.status === 409) {
+      createError.value = error.response.data?.message || 'That username or email is already in use.'
+    } else if (error.response?.status === 400) {
+      createError.value = error.response.data?.message || 'Please check the form and try again.'
+    } else {
+      createError.value = 'Could not create this account. Please try again.'
+    }
+  } finally {
+    isCreating.value = false
+  }
 }
 </script>
 
@@ -207,6 +364,17 @@ const saveEdit = () => {
 
       <!-- Content -->
       <main class="p-6 space-y-6">
+        <!-- Load error -->
+        <div v-if="loadError" class="rounded-xl bg-red-50 border border-red-200 px-4 py-3 flex items-center justify-between">
+          <p class="text-red-600 text-sm">{{ loadError }}</p>
+          <button @click="fetchUsers" class="text-sm font-semibold text-red-700 hover:underline shrink-0">Retry</button>
+        </div>
+
+        <!-- Action error (status/reset) -->
+        <div v-if="actionError" class="rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+          <p class="text-red-600 text-sm">{{ actionError }}</p>
+        </div>
+
         <!-- Summary cards -->
         <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <div class="min-w-0 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
@@ -232,10 +400,10 @@ const saveEdit = () => {
           </div>
           <div class="min-w-0 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
             <div class="flex items-start justify-between gap-2">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Archived Users</p>
-              <div class="bg-rose-50 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm">🗄️</div>
+              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Awaiting Password Change</p>
+              <div class="bg-amber-50 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm">🔑</div>
             </div>
-            <p class="mt-2 text-2xl font-extrabold text-slate-900">{{ summary.archived }}</p>
+            <p class="mt-2 text-2xl font-extrabold text-slate-900">{{ summary.pendingPasswordChange }}</p>
           </div>
         </section>
 
@@ -258,9 +426,9 @@ const saveEdit = () => {
             >
               <option>All Users</option>
               <option>Parent</option>
+              <option>Doctor</option>
+              <option>Nurse</option>
               <option>Staff</option>
-              <option>Healthworker</option>
-              <option>System Admin</option>
             </select>
 
             <select
@@ -270,12 +438,11 @@ const saveEdit = () => {
               <option>All</option>
               <option>Active</option>
               <option>Inactive</option>
-              <option>Archived</option>
             </select>
 
             <div class="flex items-center gap-2 shrink-0">
-              <button class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-                Export
+              <button @click="fetchUsers" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+                Refresh
               </button>
               <button
                 @click="openAddModal"
@@ -304,8 +471,13 @@ const saveEdit = () => {
                 </tr>
               </thead>
               <tbody>
+                <tr v-if="isLoadingUsers">
+                  <td colspan="8" class="px-5 py-12 text-center text-sm text-slate-400">Loading users…</td>
+                </tr>
+
                 <tr
                   v-for="user in filteredUsers"
+                  v-else
                   :key="user.id"
                   class="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors"
                 >
@@ -315,15 +487,15 @@ const saveEdit = () => {
                     </div>
                   </td>
                   <td class="px-3 py-3 font-semibold text-slate-900 whitespace-nowrap">{{ user.firstName }} {{ user.lastName }}</td>
-                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ user.username }}</td>
+                  <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ user.username || '—' }}</td>
                   <td class="px-3 py-3">
-                    <span :class="[roleMeta[user.role].tint, roleMeta[user.role].text]" class="text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
+                    <span :class="[roleMeta[user.role]?.tint, roleMeta[user.role]?.text]" class="text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
                       {{ user.role }}
                     </span>
                   </td>
                   <td class="px-3 py-3">
-                    <span :class="[statusMeta[user.status].tint, statusMeta[user.status].text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
-                      <span :class="statusMeta[user.status].dot" class="w-1.5 h-1.5 rounded-full"></span>
+                    <span :class="[statusMeta[user.status]?.tint, statusMeta[user.status]?.text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
+                      <span :class="statusMeta[user.status]?.dot" class="w-1.5 h-1.5 rounded-full"></span>
                       {{ user.status }}
                     </span>
                   </td>
@@ -343,17 +515,15 @@ const saveEdit = () => {
                       class="absolute right-5 top-11 z-30 w-48 bg-white border border-slate-200 rounded-lg shadow-md py-1 text-left"
                     >
                       <button @click="openDrawer(user)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">View Details</button>
-                      <button @click="openEditModal(user)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">Edit Information</button>
-                      <button @click="closeMenu" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">Reset Password</button>
+                      <button @click="resetPassword(user)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">Reset Password</button>
                       <div class="my-1 border-t border-slate-100"></div>
                       <button v-if="user.status !== 'Active'" @click="setStatus(user, 'Active')" class="w-full text-left px-3.5 py-2 text-sm text-emerald-700 hover:bg-emerald-50 transition-colors">Activate</button>
                       <button v-if="user.status === 'Active'" @click="setStatus(user, 'Inactive')" class="w-full text-left px-3.5 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors">Deactivate</button>
-                      <button v-if="user.status !== 'Archived'" @click="setStatus(user, 'Archived')" class="w-full text-left px-3.5 py-2 text-sm text-rose-600 hover:bg-rose-50 transition-colors">Archive</button>
                     </div>
                   </td>
                 </tr>
 
-                <tr v-if="filteredUsers.length === 0">
+                <tr v-if="!isLoadingUsers && filteredUsers.length === 0">
                   <td colspan="8" class="px-5 py-12 text-center text-sm text-slate-400">No users match your search or filters.</td>
                 </tr>
               </tbody>
@@ -381,7 +551,7 @@ const saveEdit = () => {
             </div>
             <div>
               <p class="text-base font-bold text-slate-900">{{ selectedUser.firstName }} {{ selectedUser.lastName }}</p>
-              <span :class="[roleMeta[selectedUser.role].tint, roleMeta[selectedUser.role].text]" class="mt-1 inline-block text-xs font-semibold px-2.5 py-1 rounded-full">
+              <span :class="[roleMeta[selectedUser.role]?.tint, roleMeta[selectedUser.role]?.text]" class="mt-1 inline-block text-xs font-semibold px-2.5 py-1 rounded-full">
                 {{ selectedUser.role }}
               </span>
             </div>
@@ -390,7 +560,7 @@ const saveEdit = () => {
           <div class="bg-slate-50 rounded-lg divide-y divide-slate-200">
             <div class="flex items-center justify-between px-4 py-3">
               <span class="text-xs text-slate-500">Username</span>
-              <span class="text-sm font-medium text-slate-900">{{ selectedUser.username }}</span>
+              <span class="text-sm font-medium text-slate-900">{{ selectedUser.username || '—' }}</span>
             </div>
             <div class="flex items-center justify-between px-4 py-3">
               <span class="text-xs text-slate-500">Email</span>
@@ -402,10 +572,14 @@ const saveEdit = () => {
             </div>
             <div class="flex items-center justify-between px-4 py-3">
               <span class="text-xs text-slate-500">Account Status</span>
-              <span :class="[statusMeta[selectedUser.status].tint, statusMeta[selectedUser.status].text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full">
-                <span :class="statusMeta[selectedUser.status].dot" class="w-1.5 h-1.5 rounded-full"></span>
+              <span :class="[statusMeta[selectedUser.status]?.tint, statusMeta[selectedUser.status]?.text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <span :class="statusMeta[selectedUser.status]?.dot" class="w-1.5 h-1.5 rounded-full"></span>
                 {{ selectedUser.status }}
               </span>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3">
+              <span class="text-xs text-slate-500">Needs Password Change</span>
+              <span class="text-sm font-medium text-slate-900">{{ selectedUser.mustChangePassword ? 'Yes' : 'No' }}</span>
             </div>
             <div class="flex items-center justify-between px-4 py-3">
               <span class="text-xs text-slate-500">Date Created</span>
@@ -419,8 +593,7 @@ const saveEdit = () => {
         </div>
 
         <div class="border-t border-slate-200 p-4 flex items-center gap-2 shrink-0">
-          <button @click="openEditModal(selectedUser)" class="flex-1 text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Edit User</button>
-          <button class="flex-1 text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Reset Password</button>
+          <button @click="resetPassword(selectedUser)" class="flex-1 text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Reset Password</button>
           <button @click="closeDrawer" class="text-sm font-semibold px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-50 transition-colors">Close</button>
         </div>
       </aside>
@@ -440,86 +613,102 @@ const saveEdit = () => {
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Role</label>
               <select v-model="addForm.role" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
                 <option>Parent</option>
+                <option>Doctor</option>
+                <option>Nurse</option>
                 <option>Staff</option>
-                <option>Healthworker</option>
-                <option>System Admin</option>
               </select>
             </div>
+
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">First Name</label>
               <input v-model="addForm.firstName" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Middle Name</label>
+              <input v-model="addForm.middleName" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+            </div>
+            <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Last Name</label>
               <input v-model="addForm.lastName" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
-            <div>
+
+            <!-- Personnel-only: Username -->
+            <div v-if="isPersonnelRole">
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Username</label>
               <input v-model="addForm.username" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
+
+            <!-- Doctor/Nurse-only: License number -->
+            <div v-if="showLicenseField">
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">License / PRC Number</label>
+              <input v-model="addForm.licenseNumber" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+            </div>
+
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Email</label>
               <input v-model="addForm.email" type="email" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Password</label>
-              <input v-model="addForm.password" type="password" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Contact Number</label>
+              <input v-model="addForm.contactNo" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Confirm Password</label>
-              <input v-model="addForm.confirmPassword" type="password" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+
+            <!-- Parent-only: Barangay -->
+            <div v-if="!isPersonnelRole">
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Barangay No.</label>
+              <input v-model="addForm.barangayNo" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
+
+            <div :class="isPersonnelRole ? 'sm:col-span-2' : ''">
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Address</label>
+              <input v-model="addForm.address" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+            </div>
+
+            <div v-if="createError" class="sm:col-span-2 rounded-lg bg-red-50 border border-red-200 px-3.5 py-2.5">
+              <p class="text-red-600 text-xs">{{ createError }}</p>
+            </div>
+
+            <p class="sm:col-span-2 text-xs text-slate-400">
+              A temporary password will be generated automatically once you create this account.
+            </p>
           </div>
 
           <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200">
             <button @click="showAddModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-            <button @click="createUser" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Create User</button>
+            <button
+              @click="createUser"
+              :disabled="!canCreate || isCreating"
+              class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-300 transition-colors"
+            >
+              {{ isCreating ? 'Creating…' : 'Create User' }}
+            </button>
           </div>
         </div>
       </div>
     </transition>
 
-    <!-- ============================ EDIT USER MODAL ============================ -->
+    <!-- ======================= TEMPORARY PASSWORD MODAL ======================= -->
     <transition name="fade">
-      <div v-if="showEditModal" class="fixed inset-0 bg-slate-900/40 z-40 flex items-center justify-center p-4" @click.self="showEditModal = false">
-        <div class="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-          <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-            <h2 class="text-base font-bold text-slate-900">Edit User</h2>
-            <button @click="showEditModal = false" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
-          </div>
+      <div v-if="showTempPasswordModal" class="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4" @click.self="closeTempPasswordModal">
+        <div class="bg-white rounded-xl shadow-lg w-full max-w-sm p-6">
+          <div class="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl mb-4">🔑</div>
+          <h2 class="text-base font-bold text-slate-900 mb-1">Temporary password ready</h2>
+          <p class="text-sm text-slate-500 mb-4">
+            Share this with <span class="font-semibold text-slate-700">{{ tempPasswordResult?.name }}</span> — it's shown only once here, so copy it now.
+          </p>
 
-          <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div class="sm:col-span-2">
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Role</label>
-              <select v-model="editForm.role" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
-                <option>Parent</option>
-                <option>Staff</option>
-                <option>Healthworker</option>
-                <option>System Admin</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">First Name</label>
-              <input v-model="editForm.firstName" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Last Name</label>
-              <input v-model="editForm.lastName" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Username</label>
-              <input v-model="editForm.username" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Email</label>
-              <input v-model="editForm.email" type="email" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
+          <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 mb-2">
+            <code class="flex-1 text-sm font-mono font-semibold text-slate-900 tracking-wide select-all">{{ tempPasswordResult?.password }}</code>
+            <button @click="copyTempPassword" class="text-xs font-semibold px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shrink-0">
+              Copy
+            </button>
           </div>
+          <p v-if="copyStatus" class="text-xs text-emerald-600 mb-4">{{ copyStatus }}</p>
+          <p v-else class="text-xs text-transparent mb-4">placeholder</p>
 
-          <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200">
-            <button @click="showEditModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-            <button @click="saveEdit" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Save Changes</button>
-          </div>
+          <button @click="closeTempPasswordModal" class="w-full text-sm font-semibold px-4 py-2.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+            Done
+          </button>
         </div>
       </div>
     </transition>

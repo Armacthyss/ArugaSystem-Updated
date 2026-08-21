@@ -11,6 +11,8 @@ namespace AndroidWebAPI.Data
 
         public DbSet<Child> Children { get; set; }
         public DbSet<Parent> Parents { get; set; }
+        public DbSet<Account> Accounts { get; set; }
+        public DbSet<AccountOtp> AccountOtps { get; set; }
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<User> Users { get; set; }
         public DbSet<VaccinationRecord> VaccinationRecords { get; set; }
@@ -22,8 +24,10 @@ namespace AndroidWebAPI.Data
         public DbSet<VaccineInventory> VaccineInventory { get; set; }
         
         public DbSet<ChildParentRelationship> ChildParentRelationships { get; set; }
-     
+     public DbSet<ClinicOperatingSchedule> ClinicOperatingSchedules { get; set; }
 
+     
+public DbSet<ClinicScheduleException> ClinicScheduleExceptions { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<ChildParentRelationship>(entity =>
@@ -43,6 +47,17 @@ namespace AndroidWebAPI.Data
 
             modelBuilder.Entity<VaccinationRecord>()
                 .HasKey(v => v.VaccinationRecordID);
+                modelBuilder.Entity<AccountOtp>()
+    .HasOne(o => o.Parent)
+    .WithMany()
+    .HasForeignKey(o => o.ParentID)
+    .OnDelete(DeleteBehavior.Cascade);
+
+modelBuilder.Entity<AccountOtp>()
+    .HasOne(o => o.User)
+    .WithMany()
+    .HasForeignKey(o => o.UserID)
+    .OnDelete(DeleteBehavior.Cascade);
             modelBuilder.Entity<VaccinationTimeline>()
                 .HasKey(v => v.TimelineID);
 
@@ -55,7 +70,17 @@ namespace AndroidWebAPI.Data
 
             modelBuilder.Entity<VaccineDose>()
                 .HasKey(v => v.DoseID);
+modelBuilder.Entity<VaccinationRecord>()
+    .HasOne(v => v.AdministeredBy)
+    .WithMany(p => p.VaccinationRecords)
+    .HasForeignKey(v => v.AdministeredByPersonnelID)
+    .OnDelete(DeleteBehavior.Restrict);
 
+modelBuilder.Entity<VaccinationRecord>()
+    .HasOne(v => v.DoctorDiagnosedBy)
+    .WithMany()
+    .HasForeignKey(v => v.DoctorDiagnosedByPersonnelID)
+    .OnDelete(DeleteBehavior.Restrict);
             base.OnModelCreating(modelBuilder);
         }
     }

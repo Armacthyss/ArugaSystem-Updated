@@ -22,10 +22,11 @@ namespace AndroidWebAPI.Data
             using IDbConnection connection = new SqlConnection(_connectionString);
 
             string sql = @"
-                SELECT *
+            SELECT *
                 FROM VaccineInventory
-                ORDER BY ExpirationDate";
-
+                ORDER BY ExpirationDate
+                ";
+                
             return await connection.QueryAsync<VaccineInventory>(sql);
         }
 

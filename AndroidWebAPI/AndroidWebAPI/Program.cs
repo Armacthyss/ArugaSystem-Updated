@@ -1,6 +1,9 @@
 using AndroidWebAPI.Data;
 using AndroidWebAPI.Data.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authentication.JwtBearer;    
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using AndroidWebAPI.DTOs;
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,20 +16,72 @@ builder.WebHost.UseUrls(
 // ── Services ─────────────────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description = "Enter your JWT token."
+    });
+
+    options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 builder.Services.AddScoped<VaccineRepository>();
 builder.Services.AddScoped<VaccineDoseRepository>();
 builder.Services.AddScoped<VaccineInventoryRepository>();
 builder.Services.AddScoped<IVaccinationTimelineRepository, VaccinationTimelineRepository>();
-
+builder.Services.AddScoped<
+    IChildParentRelationshipRepository,
+    ChildParentRelationshipRepository>();
 builder.Services.AddScoped<IVaccinationRecordRepository, VaccinationRecordRepository>();
 
 builder.Services.AddScoped<IVaccinationScheduleRuleRepository, VaccinationScheduleRuleRepository>();
 
 builder.Services.AddScoped<IChildrenRepository, ChildrenRepository>();
 builder.Services.AddScoped<ParentRepository>();          // ← only once
+builder.Services.AddScoped<IAccountRepository, AccountRepositoryImpl>();
 builder.Services.AddDbContext<AppDbContext>(options =>   // ← only once
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(
+                    builder.Configuration["Jwt:Key"]!
+                )
+            )
+        };
+    });
+builder.Services.AddAuthorization();
 
 builder.Services.AddCors(options =>
 {
@@ -41,7 +96,8 @@ builder.Services.AddHostedService<NotificationGeneratorService>();  // ← only 
 // ── Build ─────────────────────────────────────────────────────
 var app = builder.Build();
 
-// ── Middleware (Optional but recommended) ─────────────────────
+app.UseHttpsRedirection();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -49,8 +105,10 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowVueApp");
+
+app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
 
-// ── Start the Application ─────────────────────────────────────
-app.Run(); // <--- THIS IS THE MISSING PIECE
+app.Run();

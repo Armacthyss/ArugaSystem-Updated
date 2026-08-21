@@ -1,6 +1,6 @@
 using AndroidWebAPI.Models;
 using Microsoft.EntityFrameworkCore;
-
+using AndroidWebAPI.DTOs;
 namespace AndroidWebAPI.Data.Repositories
 {
     public class VaccinationRecordRepository : IVaccinationRecordRepository
@@ -29,14 +29,39 @@ namespace AndroidWebAPI.Data.Repositories
             return await _context.VaccinationRecords
                 .FirstOrDefaultAsync(r => r.VaccinationRecordID == vaccinationRecordId);
         }
-
-        public async Task<IEnumerable<VaccinationRecord>> GetByChildAsync(Guid childId)
+        
+public async Task<IEnumerable<VaccinationRecordResponseDto>> GetByChildAsync(Guid childId)
+{
+    return await _context.VaccinationRecords
+        .Where(r => r.ChildID == childId)
+        .OrderBy(r => r.VaccinationDate)
+        .Select(r => new VaccinationRecordResponseDto
         {
-            return await _context.VaccinationRecords
-                .Where(r => r.ChildID == childId)
-                .OrderBy(r => r.VaccinationDate)
-                .ToListAsync();
-        }
+            VaccinationRecordID = r.VaccinationRecordID,
+            RecordCode = r.RecordCode,
+            ChildID = r.ChildID,
+            VaccineID = r.VaccineID,
+            VaccineName = r.Vaccine != null
+                ? r.Vaccine.VaccineName
+                : string.Empty,
+            DoseNumber = r.DoseNumber,
+            VaccinationDate = r.VaccinationDate,
+            Status = r.Status,
+            AdministeredByPersonnelID = r.AdministeredByPersonnelID,
+            AdministeredByName = r.AdministeredBy != null
+                ? r.AdministeredBy.FirstName + " " + r.AdministeredBy.LastName
+                : null,
+            NurseObservation = r.NurseObservation,
+            DoctorDiagnosis = r.DoctorDiagnosis,
+            DoctorDiagnosedByPersonnelID = r.DoctorDiagnosedByPersonnelID,
+            DoctorDiagnosedByName = r.DoctorDiagnosedBy != null
+                ? r.DoctorDiagnosedBy.FirstName + " " + r.DoctorDiagnosedBy.LastName
+                : null,
+            DoctorDiagnosedAt = r.DoctorDiagnosedAt
+        })
+        .ToListAsync();
+}
+        
 
         public async Task AddAsync(VaccinationRecord record)
         {
@@ -69,52 +94,168 @@ namespace AndroidWebAPI.Data.Repositories
                 r.DoseNumber == doseNumber);
         }
         
-
-        public async Task RecordVaccinationAsync(VaccinationRecord record)
+public async Task RecordVaccinationAsync(VaccinationRecord record)
 {
-    await using var transaction = await _context.Database.BeginTransactionAsync();
+    await using var transaction =
+        await _context.Database.BeginTransactionAsync();
 
     try
     {
-        // Prevent duplicate vaccination
-        if (await AlreadyVaccinatedAsync(record.ChildID, record.VaccineID, record.DoseNumber))
-            throw new Exception("This vaccine dose has already been administered.");
+        // ==========================================
+        // 1. Prevent duplicate vaccination
+        // ==========================================
 
-        // Check inventory
+        if (await AlreadyVaccinatedAsync(
+            record.ChildID,
+            record.VaccineID,
+            record.DoseNumber))
+        {
+            throw new Exception(
+                "This vaccine dose has already been recorded for this child.");
+        }
+
+        // ==========================================
+        // 2. Verify child exists
+        // ==========================================
+
+        var childExists = await _context.Children
+            .AnyAsync(c => c.ChildID == record.ChildID);
+
+        if (!childExists)
+            throw new Exception("Child not found.");
+
+        // ==========================================
+        // 3. Verify vaccine exists
+        // ==========================================
+
+        var vaccineExists = await _context.Vaccines
+            .AnyAsync(v => v.VaccineID == record.VaccineID);
+
+        if (!vaccineExists)
+            throw new Exception("Vaccine not found.");
+
+        // ==========================================
+        // 4. Inventory is REQUIRED for clinic
+        // ==========================================
+
+        if (!record.InventoryID.HasValue)
+        {
+            throw new Exception(
+                "InventoryID is required when recording a clinic vaccination.");
+        }
+
+        // ==========================================
+        // 5. Find inventory
+        // ==========================================
+
         var inventory = await _context.VaccineInventory
-            .FirstOrDefaultAsync(i => i.InventoryID == record.InventoryID);
+            .FirstOrDefaultAsync(i =>
+                i.InventoryID == record.InventoryID.Value);
 
         if (inventory == null)
             throw new Exception("Vaccine inventory not found.");
 
-        if (inventory.CurrentQuantity <= 0)
-            throw new Exception("No vaccine stock remaining.");
+        // ==========================================
+        // 6. Make sure inventory belongs to vaccine
+        // ==========================================
 
-        // Deduct stock
+        if (inventory.VaccineID != record.VaccineID)
+        {
+            throw new Exception(
+                "The selected inventory does not belong to the selected vaccine.");
+        }
+
+        // ==========================================
+        // 7. Check inventory status
+        // ==========================================
+
+        if (!inventory.Status)
+        {
+            throw new Exception(
+                "The selected vaccine inventory is inactive.");
+        }
+
+        // ==========================================
+        // 8. Check expiration
+        // ==========================================
+
+        if (inventory.ExpirationDate.Date < DateTime.Today)
+        {
+            throw new Exception(
+                "The selected vaccine inventory has expired.");
+        }
+
+        // ==========================================
+        // 9. Check stock
+        // ==========================================
+
+        if (inventory.CurrentQuantity <= 0)
+        {
+            throw new Exception(
+                "No vaccine stock remaining.");
+        }
+
+        // ==========================================
+        // 10. Deduct inventory
+        // ==========================================
+
         inventory.CurrentQuantity--;
 
-        // Save vaccination record
+        inventory.UpdatedAt = DateTime.UtcNow;
+
+        // ==========================================
+        // 11. Create vaccination record
+        // ==========================================
+
         record.VaccinationRecordID = Guid.NewGuid();
+
+        record.RecordCode =
+            $"VR-{Guid.NewGuid().ToString("N")[..12].ToUpper()}";
+
+        record.Status = "Completed";
+
         record.CreatedAt = DateTime.UtcNow;
 
-        await _context.VaccinationRecords.AddAsync(record);
+        // ==========================================
+        // 12. Find matching pending timeline
+        // ==========================================
 
-        // Find corresponding timeline
         var timeline = await _context.VaccinationTimelines
-    .FirstOrDefaultAsync(t =>
-        t.ChildID == record.ChildID &&
-        t.VaccineID == record.VaccineID &&
-        t.DoseNumber == record.DoseNumber &&
-        t.Status == "Pending");
+            .FirstOrDefaultAsync(t =>
+                t.ChildID == record.ChildID &&
+                t.VaccineID == record.VaccineID &&
+                t.DoseNumber == record.DoseNumber &&
+                t.Status == "Pending");
+
+        // ==========================================
+        // 13. Complete and link timeline
+        // ==========================================
 
         if (timeline != null)
         {
             timeline.Status = "Completed";
-            timeline.VaccinationRecordID = record.VaccinationRecordID;
+
+            timeline.VaccinationRecordID =
+                record.VaccinationRecordID;
+
             timeline.UpdatedAt = DateTime.UtcNow;
+
+            record.TimelineID =
+                timeline.TimelineID;
         }
 
+        // ==========================================
+        // 14. Save everything
+        // ==========================================
+
+        await _context.VaccinationRecords.AddAsync(record);
+
         await _context.SaveChangesAsync();
+
+        // ==========================================
+        // 15. Commit transaction
+        // ==========================================
+
         await transaction.CommitAsync();
     }
     catch
@@ -124,5 +265,91 @@ namespace AndroidWebAPI.Data.Repositories
     }
 }
 
+public async Task RecordHistoricalVaccinationsAsync(
+    HistoricalVaccinationSubmissionDto submission)
+{
+    await using var transaction =
+        await _context.Database.BeginTransactionAsync();
+
+    try
+    {
+        // 1. Verify child exists
+        var childExists = await _context.Children
+            .AnyAsync(c => c.ChildID == submission.ChildID);
+
+        if (!childExists)
+            throw new Exception("Child not found.");
+
+        // 2. Nothing to save
+        if (submission.Vaccinations == null ||
+    !submission.Vaccinations.Any())
+        {
+            throw new Exception(
+                "No historical vaccination records were provided.");
+        }
+
+        // 3. Process each historical vaccination
+        foreach (var item in submission.Vaccinations)
+        {
+            // Verify vaccine exists
+            var vaccineExists = await _context.Vaccines
+                .AnyAsync(v => v.VaccineID == item.VaccineID);
+
+            if (!vaccineExists)
+                throw new Exception(
+                    $"Vaccine {item.VaccineID} not found.");
+
+            // Prevent duplicate vaccine + dose for this child
+            var alreadyExists = await AlreadyVaccinatedAsync(
+                submission.ChildID,
+                item.VaccineID,
+                item.DoseNumber);
+
+            if (alreadyExists)
+                throw new Exception(
+                    $"Dose {item.DoseNumber} for vaccine {item.VaccineID} "
+                    + "has already been recorded.");
+
+            // Create historical record
+            var record = new VaccinationRecord
+            {
+                VaccinationRecordID = Guid.NewGuid(),
+
+                ChildID = submission.ChildID,
+
+                VaccineID = item.VaccineID,
+                RecordCode = $"HIST-{Guid.NewGuid().ToString("N")[..20]}".ToUpper(),
+
+                // Historical record:
+                // no clinic inventory was used.
+                InventoryID = null,
+
+                // Not linked to a timeline yet.
+                TimelineID = null,
+
+                DoseNumber = item.DoseNumber,
+
+                VaccinationDate = item.VaccinationDate,
+
+                Status = "Completed",
+
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _context.VaccinationRecords.AddAsync(record);
+        }
+
+        // 4. Save all records together
+        await _context.SaveChangesAsync();
+
+        // 5. Commit transaction
+        await transaction.CommitAsync();
+    }
+    catch
+    {
+        await transaction.RollbackAsync();
+        throw;
+    }
+}
     }
 }

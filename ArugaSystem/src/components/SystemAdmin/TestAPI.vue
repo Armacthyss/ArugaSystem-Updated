@@ -3,29 +3,35 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import axios from 'axios'
 
 /* =========================================================================
-   API LAYER — unchanged endpoints/contract from the original component.
-   deleteInventory is no longer called anywhere (see "never delete" below),
-   but it's left here in case you still want it available elsewhere.
+   API LAYER
+   Talks to VaccinesController + VaccineInventoryController from your
+   AndroidWebAPI project. Endpoints/contract are unchanged from your code.
 
-   ASSUMPTION CARRIED FORWARD: the boolean lifecycle flag is sent to the API
-   under the JSON key `status` (this matches the original submitReceiveStock,
-   which posted `status: true` on create). The UI below renames this to
-   "isActive" everywhere for clarity, but the wire key stays `status` so the
-   API contract is untouched. If your real DTO uses a different key
-   (e.g. IsActive), it's a one-line change in the two payload builders below.
+   ASSUMPTIONS CARRIED OVER FROM YOUR ORIGINAL FILE (please check these
+   against your actual DTOs and change the one-liners if they don't match):
+
+   1. VaccineInventory lifecycle flag is sent/received under JSON key
+      `status` (boolean). true = active, false = inactive.
+
+   2. Vaccine itself ALSO has a lifecycle flag. Your posted VaccinesController
+      doesn't show the Vaccine model, so I couldn't confirm the exact field
+      name. `isVaccineActive()` below checks a few common possibilities
+      (`status`, `isActive`, `active`) and falls back to "active" if none of
+      them are present, so nothing silently disappears from the dropdown if
+      your API doesn't send this field at all. If your Vaccine model uses a
+      different property name (e.g. `IsActive` serialized differently),
+      update the one line inside isVaccineActive().
 ========================================================================= */
 const API_BASE = 'http://localhost:57147/api'
 const api = {
-  getInventory:         ()            => axios.get(`${API_BASE}/VaccineInventory`).then(r => r.data),
-  getInventoryByVaccine:(vaccineId)   => axios.get(`${API_BASE}/VaccineInventory/vaccine/${vaccineId}`).then(r => r.data),
-  createInventory:      (payload)     => axios.post(`${API_BASE}/VaccineInventory`, payload).then(r => r.data),
-  updateInventory:      (id, payload) => axios.put(`${API_BASE}/VaccineInventory/${id}`, payload).then(r => r.data),
-  deleteInventory:      (id)          => axios.delete(`${API_BASE}/VaccineInventory/${id}`).then(r => r.data),
-  getVaccines:          ()            => axios.get(`${API_BASE}/Vaccines`).then(r => r.data),
+  getInventory:          ()          => axios.get(`${API_BASE}/VaccineInventory`).then(r => r.data),
+  getInventoryByVaccine: (vaccineId) => axios.get(`${API_BASE}/VaccineInventory/vaccine/${vaccineId}`).then(r => r.data),
+  createInventory:       (payload)   => axios.post(`${API_BASE}/VaccineInventory`, payload).then(r => r.data),
+  updateInventory:       (id, payload) => axios.put(`${API_BASE}/VaccineInventory/${id}`, payload).then(r => r.data),
+  getVaccines:           ()          => axios.get(`${API_BASE}/Vaccines`).then(r => r.data),
 }
 
 /* ----------------------------- Sidebar state ------------------------------ */
-/* Untouched — same nav, same theme, same collapse behavior as the rest of the app. */
 const isCollapsed = ref(false)
 const toggleSidebar = () => (isCollapsed.value = !isCollapsed.value)
 
@@ -44,14 +50,14 @@ const activeNav = ref('Inventory')
 
 /* -------------------------------- Status meta -------------------------------- */
 const statusMeta = {
-  Healthy:    { tint: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-  'Low Stock':{ tint: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-500' },
-  Expired:    { tint: 'bg-red-100',    text: 'text-red-800',     dot: 'bg-red-700' },
+  Healthy:     { tint: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+  'Low Stock': { tint: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-500' },
+  Expired:     { tint: 'bg-red-100',    text: 'text-red-800',     dot: 'bg-red-700' },
 }
 
 /* ============================= Core data (loaded from API) ============================= */
-const inventory = ref([])   // raw VaccineInventory rows, as returned by the API
-const vaccines = ref([])    // raw Vaccines rows, as returned by the API
+const inventory = ref([])   // raw VaccineInventory rows
+const vaccines = ref([])    // raw Vaccine rows
 const isLoading = ref(false)
 const isSaving = ref(false)
 const error = ref(null)
@@ -94,16 +100,13 @@ function daysUntil(iso) {
   const d = new Date(iso)
   return Math.ceil((d - startOfToday) / 86400000)
 }
-// Status is always derived live from ExpirationDate / CurrentQuantity / MinimumStock.
-// Nothing sets this by hand anymore — see the Edit modal, which only exposes
-// Lot Number / Supplier / Minimum Stock / Expiration / Active-Inactive.
+// Batch status is always derived live from ExpirationDate / CurrentQuantity / MinimumStock.
 function computeStatus(item) {
   if (daysUntil(item.expirationDate) < 0) return 'Expired'
   if (item.currentQuantity <= item.minimumStock) return 'Low Stock'
   return 'Healthy'
 }
-// isActive reads the boolean lifecycle flag (wire key: status). Defaults to
-// true if the API hasn't returned the field yet, so nothing looks "dead" pre-load.
+// isActive on a BATCH reads the boolean lifecycle flag (wire key: status).
 function isActive(item) {
   return item.status !== false
 }
@@ -111,12 +114,30 @@ function shouldRecommendDeactivation(item) {
   return isActive(item) && computeStatus(item) === 'Expired' && (item.currentQuantity || 0) === 0
 }
 
+// isVaccineActive checks the VACCINE record itself (not a batch). Used to decide
+// whether a vaccine should be selectable when receiving a new batch.
+// See the assumptions note at the top of this file.
+function isVaccineActive(v) {
+  if (!v) return false
+  if (typeof v.status === 'boolean') return v.status
+  if (typeof v.isActive === 'boolean') return v.isActive
+  if (typeof v.active === 'boolean') return v.active
+  // Field not present on the DTO at all -> treat as active so nothing
+  // vanishes from the dropdown just because the API doesn't send this yet.
+  return true
+}
+
+// Only active vaccines may be picked when registering a new batch.
+const activeVaccines = computed(() => vaccines.value.filter(isVaccineActive))
+
 /* ---------------------------- Toolbar / filters ---------------------------- */
+// Filters intentionally list ALL vaccines (active + inactive) so existing
+// batches under a since-deactivated vaccine are still searchable/visible.
 const searchQuery = ref('')
 const vaccineFilter = ref('All')
 const statusFilter = ref('All')
 const expirationFilter = ref('All') // All | Expiring Soon | Expired | Valid
-const activeFilter = ref('All')     // All | Active | Inactive
+const activeFilter = ref('All')     // All | Active | Inactive (batch lifecycle)
 
 const filteredInventory = computed(() => {
   const list = Array.isArray(inventory.value) ? inventory.value : []
@@ -149,7 +170,14 @@ const filteredInventory = computed(() => {
   })
 })
 
-/* ------------------------- Grouped by vaccine, FEFO within group ------------------------- */
+/* ------------------------- Grouped by vaccine, FEFO within group -------------------------
+   e.g.
+     BCG Vaccine
+       - LOT-88214
+       - LOT-51092
+     Pentavalent Vaccine
+       - LOT-65120
+------------------------------------------------------------------------------------------- */
 const groupedInventory = computed(() => {
   const map = new Map()
   for (const item of filteredInventory.value) {
@@ -161,9 +189,11 @@ const groupedInventory = computed(() => {
     // First Expired, First Out — earliest expiration date first.
     const sorted = [...batches].sort((a, b) => new Date(a.expirationDate) - new Date(b.expirationDate))
     const activeBatches = sorted.filter(isActive)
+    const vaccineRecord = vaccines.value.find(v => v.vaccineID === vaccineID)
     return {
       vaccineID,
       vaccineName: vaccineName(vaccineID),
+      vaccineIsActive: isVaccineActive(vaccineRecord),
       batches: sorted,
       batchCount: sorted.length,
       totalDoses: activeBatches.reduce((sum, b) => sum + (b.currentQuantity || 0), 0),
@@ -178,8 +208,6 @@ const groupedInventory = computed(() => {
 })
 
 /* ------------------------------ Pagination (over vaccine groups) ---------------------------- */
-// Paginating by vaccine group (not raw batch rows) keeps FEFO ordering intact within a group
-// and scales cleanly as more vaccines are added — a page never splits a vaccine's batches apart.
 const pageSize = ref(25)
 const currentPage = ref(1)
 const totalGroups = computed(() => groupedInventory.value.length)
@@ -250,6 +278,18 @@ const openMenuId = ref(null)
 const toggleMenu = (id) => (openMenuId.value = openMenuId.value === id ? null : id)
 const closeMenu = () => (openMenuId.value = null)
 
+/* --------------------------------- Batch details drawer --------------------------------- */
+const showDrawer = ref(false)
+const selectedBatch = ref(null)
+function openDrawer(item) {
+  selectedBatch.value = item
+  showDrawer.value = true
+  closeMenu()
+}
+function closeDrawer() {
+  showDrawer.value = false
+}
+
 /* --------------------------------- Receive New Batch modal --------------------------------- */
 const showReceiveModal = ref(false)
 const formError = ref(null)
@@ -272,6 +312,14 @@ async function submitReceiveStock() {
     formError.value = 'Please fill all required fields.'
     return
   }
+  // Belt-and-suspenders: re-check the chosen vaccine is still active right before
+  // submit, in case the underlying data changed while the modal was open.
+  const chosen = vaccines.value.find(v => v.vaccineID === receiveForm.vaccineID)
+  if (!isVaccineActive(chosen)) {
+    formError.value = 'This vaccine is inactive and cannot receive new batches.'
+    return
+  }
+
   isSaving.value = true
   try {
     const qty = Number(receiveForm.initialQuantity)
@@ -279,7 +327,7 @@ async function submitReceiveStock() {
       vaccineID: receiveForm.vaccineID,
       lotNumber: receiveForm.lotNumber,
       initialQuantity: qty,
-      currentQuantity: qty, // always mirrors InitialQuantity on receive — a fresh batch starts full
+      currentQuantity: qty, // a fresh batch always starts full
       minimumStock: Number(receiveForm.minimumStock),
       expirationDate: receiveForm.expirationDate,
       receivedDate: receiveForm.receivedDate,
@@ -287,7 +335,6 @@ async function submitReceiveStock() {
       status: true, // new batches are active by default
     })
     await loadAll()
-    // Auto-expand the vaccine group the new batch belongs to, so it's visible immediately.
     expandedGroups.value = new Set([...expandedGroups.value, receiveForm.vaccineID])
     showReceiveModal.value = false
     formError.value = null
@@ -325,9 +372,8 @@ async function submitEdit() {
   isSaving.value = true
   try {
     const raw = editForm.raw || {}
-    // VaccineID / InitialQuantity / CurrentQuantity / ReceivedDate are intentionally NOT
-    // editable here — dose counts should only change through vaccination-administration
-    // actions, not manual edits. Re-sent unchanged in case the API replaces the whole row.
+    // VaccineID / InitialQuantity / CurrentQuantity / ReceivedDate stay untouched here —
+    // dose counts should only change through vaccination-administration actions.
     await api.updateInventory(editForm.id, {
       vaccineID: raw.vaccineID,
       lotNumber: editForm.lotNumber,
@@ -349,9 +395,8 @@ async function submitEdit() {
   }
 }
 
-/* --------------------------------- Activate / Deactivate (replaces Delete) --------------------------------- */
-// Inventory is never deleted — batches must remain for reports, history, and audit logs.
-// Deactivating asks for confirmation (it removes a batch from active use); activating doesn't.
+/* --------------------------------- Activate / Deactivate batch (replaces Delete) --------------------------------- */
+// Inventory batches are never deleted — they stay for reports, history, and audit logs.
 const showDeactivateModal = ref(false)
 const deactivateTarget = ref(null)
 function confirmDeactivate(item) {
@@ -395,7 +440,7 @@ async function setActiveState(item, nextActive) {
 
 <template>
   <div class="min-h-screen bg-slate-50 flex text-slate-900" @click="closeMenu">
-    <!-- ============================ SIDEBAR (untouched) ============================ -->
+    <!-- ============================ SIDEBAR ============================ -->
     <aside
       :class="[isCollapsed ? 'w-20' : 'w-65']"
       class="hidden md:flex flex-col shrink-0 sticky top-0 h-screen bg-white border-r border-slate-200 transition-all duration-300 ease-in-out"
@@ -463,7 +508,7 @@ async function setActiveState(item, nextActive) {
           <button @click="loadAll" class="font-semibold underline shrink-0 ml-3">Retry</button>
         </div>
 
-        <!-- ============ Compact overview strip (replaces the 6 large cards) ============ -->
+        <!-- ============ Compact overview strip ============ -->
         <section class="bg-white border border-slate-200 rounded-xl shadow-sm px-5 py-3.5">
           <div class="flex flex-wrap items-center gap-x-8 gap-y-2">
             <div class="flex items-center gap-2">
@@ -514,7 +559,9 @@ async function setActiveState(item, nextActive) {
 
             <select v-model="vaccineFilter" class="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
               <option value="All">All Vaccines</option>
-              <option v-for="v in vaccines" :key="v.vaccineID" :value="v.vaccineID">{{ v.vaccineName }}</option>
+              <option v-for="v in vaccines" :key="v.vaccineID" :value="v.vaccineID">
+                {{ v.vaccineName }}{{ !isVaccineActive(v) ? ' (inactive)' : '' }}
+              </option>
             </select>
 
             <select v-model="statusFilter" class="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
@@ -571,7 +618,7 @@ async function setActiveState(item, nextActive) {
 
             <div v-else class="divide-y divide-slate-100">
               <div v-for="group in paginatedGroups" :key="group.vaccineID">
-                <!-- Group header -->
+                <!-- Group header: e.g. "BCG Vaccine" containing its lots -->
                 <button
                   @click="toggleGroup(group.vaccineID)"
                   class="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition-colors text-left"
@@ -581,6 +628,7 @@ async function setActiveState(item, nextActive) {
                     :class="expandedGroups.has(group.vaccineID) ? 'rotate-90' : ''"
                   >▶</span>
                   <span class="font-semibold text-slate-900 text-sm">{{ group.vaccineName }}</span>
+                  <span v-if="!group.vaccineIsActive" class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 whitespace-nowrap">Vaccine inactive</span>
                   <span class="text-xs text-slate-400">
                     {{ group.batchCount }} batch{{ group.batchCount === 1 ? '' : 'es' }} · {{ group.totalDoses }} doses
                   </span>
@@ -590,7 +638,7 @@ async function setActiveState(item, nextActive) {
                   <span v-else-if="group.hasExpiring" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-700">Expiring soon</span>
                 </button>
 
-                <!-- Batch rows -->
+                <!-- Batch rows (lots) under this vaccine group -->
                 <div v-if="expandedGroups.has(group.vaccineID)" class="bg-slate-50/40">
                   <table class="w-full text-sm">
                     <thead>
@@ -612,10 +660,10 @@ async function setActiveState(item, nextActive) {
                         :class="!isActive(item) ? 'opacity-60' : ''"
                       >
                         <td class="pl-12 pr-3 py-2.5">
-                          <div class="flex items-center gap-2">
+                          <button @click.stop="openDrawer(item)" class="flex items-center gap-2 hover:underline decoration-slate-300 underline-offset-2">
                             <span class="font-mono text-xs text-slate-600 whitespace-nowrap">{{ item.lotNumber }}</span>
                             <span v-if="idx === 0 && isActive(item)" class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 whitespace-nowrap">Use next</span>
-                          </div>
+                          </button>
                         </td>
                         <td class="px-3 py-2.5 whitespace-nowrap">
                           <span class="font-semibold text-slate-900">{{ item.currentQuantity }}</span>
@@ -649,6 +697,7 @@ async function setActiveState(item, nextActive) {
                             @click.stop
                             class="absolute right-5 top-10 z-30 w-44 bg-white border border-slate-200 rounded-lg shadow-md py-1 text-left"
                           >
+                            <button @click="openDrawer(item)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">View Details</button>
                             <button @click="openEditModal(item)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">Edit Batch</button>
                             <button
                               v-if="isActive(item)"
@@ -754,10 +803,15 @@ async function setActiveState(item, nextActive) {
           <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div class="sm:col-span-2">
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Vaccine</label>
+              <!-- Only ACTIVE vaccines are selectable here. Inactive vaccines are
+                   filtered out before they ever reach this dropdown. -->
               <select v-model="receiveForm.vaccineID" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
                 <option value="" disabled>Select a vaccine…</option>
-                <option v-for="v in vaccines" :key="v.vaccineID" :value="v.vaccineID">{{ v.vaccineName }}</option>
+                <option v-for="v in activeVaccines" :key="v.vaccineID" :value="v.vaccineID">{{ v.vaccineName }}</option>
               </select>
+              <p v-if="activeVaccines.length === 0" class="text-xs text-rose-600 mt-1.5">
+                No active vaccines available. Activate a vaccine under Vaccine Management before receiving new stock.
+              </p>
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Lot Number</label>
@@ -788,7 +842,7 @@ async function setActiveState(item, nextActive) {
 
           <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200">
             <button @click="showReceiveModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-            <button :disabled="isSaving" @click="submitReceiveStock" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50">
+            <button :disabled="isSaving || activeVaccines.length === 0" @click="submitReceiveStock" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50">
               {{ isSaving ? 'Saving…' : 'Receive Batch' }}
             </button>
           </div>
@@ -860,12 +914,60 @@ async function setActiveState(item, nextActive) {
         </div>
       </div>
     </transition>
+
+    <!-- ============================ BATCH DETAILS DRAWER ============================ -->
+    <transition name="fade">
+      <div v-if="showDrawer" class="fixed inset-0 bg-slate-900/30 z-40" @click="closeDrawer"></div>
+    </transition>
+    <transition name="slide">
+      <aside v-if="showDrawer" class="fixed top-0 right-0 h-screen w-full max-w-lg bg-white border-l border-slate-200 shadow-lg z-50 flex flex-col">
+        <div class="h-[70px] flex items-center justify-between px-6 border-b border-slate-200 shrink-0">
+          <h2 class="text-sm font-bold text-slate-900">Batch Details</h2>
+          <button @click="closeDrawer" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
+        </div>
+
+        <div v-if="selectedBatch" class="flex-1 overflow-y-auto p-6 space-y-4">
+          <div class="bg-slate-50 rounded-xl border border-slate-200 p-5">
+            <div class="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <p class="text-base font-bold text-slate-900">{{ vaccineName(selectedBatch.vaccineID) }}</p>
+                <p class="text-xs text-slate-500 font-mono mt-0.5">{{ selectedBatch.lotNumber }}</p>
+              </div>
+              <span :class="[statusMeta[computeStatus(selectedBatch)].tint, statusMeta[computeStatus(selectedBatch)].text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full shrink-0">
+                <span :class="statusMeta[computeStatus(selectedBatch)].dot" class="w-1.5 h-1.5 rounded-full"></span>
+                {{ computeStatus(selectedBatch) }}
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-3">
+              <div><p class="text-xs text-slate-500">Supplier</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.supplier || '—' }}</p></div>
+              <div><p class="text-xs text-slate-500">Lifecycle</p><p class="text-sm font-medium text-slate-900">{{ isActive(selectedBatch) ? 'Active' : 'Inactive' }}</p></div>
+              <div><p class="text-xs text-slate-500">Initial Quantity</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.initialQuantity }}</p></div>
+              <div><p class="text-xs text-slate-500">Current Quantity</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.currentQuantity }}</p></div>
+              <div><p class="text-xs text-slate-500">Minimum Stock</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.minimumStock }}</p></div>
+              <div><p class="text-xs text-slate-500">Expiration Date</p><p class="text-sm font-medium text-slate-900">{{ formatDate(selectedBatch.expirationDate) }}</p></div>
+              <div class="col-span-2"><p class="text-xs text-slate-500">Received Date</p><p class="text-sm font-medium text-slate-900">{{ formatDate(selectedBatch.receivedDate) }}</p></div>
+            </div>
+          </div>
+          <p class="text-xs text-slate-400">
+            Detailed movement/audit history isn't wired up here yet — your current API doesn't expose a per-batch history
+            endpoint. Add one on the backend (e.g. an AuditLog tied to InventoryID) and this drawer can list it here.
+          </p>
+        </div>
+
+        <div class="border-t border-slate-200 p-4 flex items-center gap-2 shrink-0">
+          <button @click="openEditModal(selectedBatch)" class="flex-1 text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Edit Batch</button>
+          <button @click="closeDrawer" class="text-sm font-semibold px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-50 transition-colors">Close</button>
+        </div>
+      </aside>
+    </transition>
   </div>
 </template>
 
 <style scoped>
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+.slide-enter-active, .slide-leave-active { transition: transform 0.25s ease; }
+.slide-enter-from, .slide-leave-to { transform: translateX(100%); }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; }

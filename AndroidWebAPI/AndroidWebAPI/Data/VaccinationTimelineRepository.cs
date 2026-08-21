@@ -75,67 +75,160 @@ namespace AndroidWebAPI.Data
         // ============================
         // BUSINESS LOGIC
         // ============================
-
+        // 
         public async Task GenerateTimelineAsync(Guid childId)
+{
+    // 1. Get child
+    var child = await _context.Children
+        .FirstOrDefaultAsync(c => c.ChildID == childId);
+
+    if (child == null)
+        throw new Exception("Child not found.");
+
+    // 2. Prevent duplicate timeline generation
+    bool timelineExists = await _context.VaccinationTimelines
+        .AnyAsync(t =>
+            t.ChildID == childId &&
+            t.Status == "Pending");
+
+    if (timelineExists)
+        throw new Exception(
+            "Vaccination timeline already exists for this child.");
+
+    // 3. Load vaccination schedule rules
+    var rules = await _context.VaccinationScheduleRules
+        .OrderBy(r => r.SequenceOrder)
+        .ToListAsync();
+
+    if (!rules.Any())
+        throw new Exception(
+            "No vaccination schedule rules found.");
+
+    // 4. Load existing vaccination records
+    var vaccinationRecords = await _context.VaccinationRecords
+        .Where(r => r.ChildID == childId)
+        .ToListAsync();
+
+    // 5. Load existing timelines
+    var existingTimelines = await _context.VaccinationTimelines
+        .Where(t => t.ChildID == childId)
+        .ToListAsync();
+
+    // 6. Generate only missing timelines
+    var timelines = new List<VaccinationTimeline>();
+
+    foreach (var rule in rules)
+    {
+        var existingTimeline = existingTimelines
+            .FirstOrDefault(t =>
+                t.VaccineID == rule.VaccineID &&
+                t.DoseNumber == rule.DoseNumber);
+
+        if (existingTimeline != null)
+            continue;
+
+        var existingRecord = vaccinationRecords
+            .FirstOrDefault(r =>
+                r.VaccineID == rule.VaccineID &&
+                r.DoseNumber == rule.DoseNumber &&
+                r.Status == "Completed");
+
+        var expectedDate =
+            child.BirthDate.AddDays(rule.RecommendedAgeDays);
+
+        var scheduledDate = await GetNextAvailableVaccinationDateAsync(expectedDate);
+
+var timeline = new VaccinationTimeline
+{
+    TimelineID = Guid.NewGuid(),
+
+    TimelineCode =
+        $"TL-{Guid.NewGuid().ToString("N")[..12].ToUpper()}",
+
+    ChildID = child.ChildID,
+    VaccineID = rule.VaccineID,
+    DoseNumber = rule.DoseNumber,
+
+    ExpectedDate = expectedDate,
+    ScheduledDate = scheduledDate,
+
+    CreatedAt = DateTime.UtcNow
+};
+
+        if (existingRecord != null)
         {
-            // 1. Get child
-            var child = await _context.Children
-                .FirstOrDefaultAsync(c => c.ChildID == childId);
+            timeline.Status = "Completed";
+            timeline.VaccinationRecordID =
+                existingRecord.VaccinationRecordID;
+        }
+        else
+        {
+            timeline.Status = "Pending";
+            timeline.VaccinationRecordID = null;
+        }
 
-            if (child == null)
-                throw new Exception("Child not found.");
+        timelines.Add(timeline);
+    }
 
-            // 2. Prevent duplicate timeline generation
-            bool timelineExists = await _context.VaccinationTimelines
-    .AnyAsync(t =>
-        t.ChildID == childId &&
-        t.Status == "Pending");
+    // 7. Save
+    if (timelines.Any())
+    {
+        await _context.VaccinationTimelines
+            .AddRangeAsync(timelines);
 
-            if (timelineExists)
-                throw new Exception("Vaccination timeline already exists for this child.");
+        await _context.SaveChangesAsync();
+    }
+}
 
-            // 3. Load vaccination schedule rules
-            var rules = await _context.VaccinationScheduleRules
-                .OrderBy(r => r.SequenceOrder)
-                .ToListAsync();
+private async Task<DateTime> GetNextAvailableVaccinationDateAsync(
+    DateTime expectedDate)
+{
+    var date = expectedDate.Date;
 
-            if (!rules.Any())
-                throw new Exception("No vaccination schedule rules found.");
+    // Safety limit so we don't accidentally loop forever
+    for (int i = 0; i < 365; i++)
+    {
+        // 1. Check if there is a special exception for this date
+        var exception = await _context.ClinicScheduleExceptions
+            .FirstOrDefaultAsync(e =>
+                e.ExceptionDate.Date == date &&
+                e.IsActive);
 
-            // 4. Generate timeline
-            var timelines = new List<VaccinationTimeline>();
-
-            foreach (var rule in rules)
+        if (exception != null)
+        {
+            // Exception overrides the normal weekly schedule
+            if (exception.IsOpen)
             {
-                var expectedDate = child.BirthDate.AddDays(rule.RecommendedAgeDays);
-
-                timelines.Add(new VaccinationTimeline
-                {
-                    TimelineID = Guid.NewGuid(),
-                    ChildID = child.ChildID,
-                    VaccineID = rule.VaccineID,
-                    DoseNumber = rule.DoseNumber,
-
-                    // Expected schedule based on DOH recommendation
-                    ExpectedDate = expectedDate,
-
-                    // Temporary:
-                    // Later this will adjust to clinic schedule
-                    ScheduledDate = expectedDate,
-
-                    Status = "Pending",
-
-                    VaccinationRecordID = null,
-
-                    CreatedAt = DateTime.UtcNow
-                });
+                return date;
             }
 
-            // 5. Save all timelines
-            await _context.VaccinationTimelines.AddRangeAsync(timelines);
-            await _context.SaveChangesAsync();
+            // Exception says clinic is closed
+            date = date.AddDays(1);
+            continue;
         }
-        public async Task MarkCompletedAsync(Guid timelineId)
+
+        // 2. No exception, so check normal weekly schedule
+        int dayOfWeek = (int)date.DayOfWeek;
+
+        var schedule = await _context.ClinicOperatingSchedules
+            .FirstOrDefaultAsync(s =>
+                s.DayOfWeek == dayOfWeek &&
+                s.IsActive);
+
+        // 3. Normal schedule says clinic is open
+        if (schedule != null && schedule.IsOpen)
+        {
+            return date;
+        }
+
+        // 4. Closed normally → try the next day
+        date = date.AddDays(1);
+    }
+
+    throw new Exception(
+        "No available pediatric vaccination schedule found within the next 365 days.");
+}
+                public async Task MarkCompletedAsync(Guid timelineId)
 {
     var timeline = await _context.VaccinationTimelines
         .FirstOrDefaultAsync(t => t.TimelineID == timelineId);
@@ -214,6 +307,28 @@ public async Task<TimelineSummaryDto> GetTimelineSummaryAsync(Guid childId)
         Completed = timelines.Count(t => t.Status == "Completed"),
         Missed = timelines.Count(t => t.Status == "Missed")
     };
+}
+
+public async Task UpdateMissedVaccinationsAsync()
+{
+    var today = DateTime.Today;
+
+    var overdueTimelines = await _context.VaccinationTimelines
+        .Where(t =>
+            t.Status == "Pending" &&
+            t.ScheduledDate.Date < today)
+        .ToListAsync();
+
+    foreach (var timeline in overdueTimelines)
+    {
+        timeline.Status = "Missed";
+        timeline.UpdatedAt = DateTime.UtcNow;
+    }
+
+    if (overdueTimelines.Any())
+    {
+        await _context.SaveChangesAsync();
+    }
 }
     }
 }

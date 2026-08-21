@@ -527,13 +527,14 @@ async function save() {
   }
 }
 
+
 </script>
 
 <template>
   <div class="min-h-screen bg-slate-50 flex text-slate-900" @click="closeMenu">
     <!-- ============================ SIDEBAR ============================ -->
     <aside
-      :class="[isCollapsed ? 'w-20' : 'w-[260px]']"
+      :class="[isCollapsed ? 'w-20' : 'w-65']"
       class="hidden md:flex flex-col shrink-0 sticky top-0 h-screen bg-white border-r border-slate-200 transition-all duration-300 ease-in-out"
     >
       <div class="h-[70px] flex items-center gap-3 px-5 border-b border-slate-200 shrink-0">
@@ -757,6 +758,7 @@ async function save() {
                       <div class="my-1 border-t border-slate-100"></div>
                       <button v-if="!vaccine.status" @click="setStatus(vaccine, true)" class="w-full text-left px-3.5 py-2 text-sm text-emerald-700 hover:bg-emerald-50 transition-colors">Activate</button>
                       <button v-if="vaccine.status" @click="setStatus(vaccine, false)" class="w-full text-left px-3.5 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors">Deactivate</button>
+                      <button @click="remove(vaccine.vaccineID)" class="w-full text-left px-3.5 py-2 text-sm text-rose-600 hover:bg-rose-50 transition-colors">Delete</button>
                     </div>
                   </td>
                 </tr>

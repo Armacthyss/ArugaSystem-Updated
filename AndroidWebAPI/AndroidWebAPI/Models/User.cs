@@ -17,7 +17,10 @@ namespace AndroidWebAPI.Models
         public string Username { get; set; } = string.Empty;
         public string PasswordHash { get; set; } = string.Empty;
 
+        public string? Email { get; set; }
         public string? ContactNo { get; set; }
+        public string? Address { get; set; }
+
         public string UserType { get; set; } = string.Empty;  // 'Doctor' | 'Nurse' | 'Staff' | 'Admin'
         public string? PRCNo { get; set; }
         public string AccountStatus { get; set; } = "Active";

@@ -22,7 +22,7 @@ namespace AndroidWebAPI.Data
         Task MarkCompletedAsync(Guid timelineId);
 
         Task RegenerateTimelineAsync(Guid childId);
-        
+        Task UpdateMissedVaccinationsAsync();
 
         Task<IEnumerable<VaccinationTimeline>> GetDueTodayAsync();
 

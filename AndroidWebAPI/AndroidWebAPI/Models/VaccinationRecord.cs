@@ -10,21 +10,32 @@ namespace AndroidWebAPI.Models
         [Key]
         public Guid VaccinationRecordID { get; set; }
 
+        public string? RecordCode { get; set; }
+
         public Guid ChildID { get; set; }
 
         public int VaccineID { get; set; }
 
-        public int InventoryID { get; set; }
+        // Nullable because historical records may not have
+        // a corresponding inventory item in our clinic.
+        public int? InventoryID { get; set; }
+
+        // Nullable because a historical vaccination may not
+        // have been linked to a generated timeline yet.
+        public Guid? TimelineID { get; set; }
 
         public int DoseNumber { get; set; }
 
         public DateTime VaccinationDate { get; set; }
 
-        public Guid AdministeredByUserID { get; set; }
+        // Personnel who entered/administered the record.
+        public Guid? AdministeredByPersonnelID { get; set; }
 
         public string? NurseObservation { get; set; }
 
         public string? DoctorDiagnosis { get; set; }
+
+        public Guid? DoctorDiagnosedByPersonnelID { get; set; }
 
         public DateTime? DoctorDiagnosedAt { get; set; }
 
@@ -35,20 +46,26 @@ namespace AndroidWebAPI.Models
 
         public DateTime? UpdatedAt { get; set; }
 
-        //------------------------------------
+        // ------------------------------------
         // Navigation Properties
-        //------------------------------------
+        // ------------------------------------
 
         [ForeignKey(nameof(ChildID))]
-        public virtual Child Child { get; set; }
+        public virtual Child? Child { get; set; }
 
         [ForeignKey(nameof(VaccineID))]
-        public virtual Vaccine Vaccine { get; set; }
+        public virtual Vaccine? Vaccine { get; set; }
 
         [ForeignKey(nameof(InventoryID))]
-        public virtual VaccineInventory Inventory { get; set; }
+        public virtual VaccineInventory? Inventory { get; set; }
 
-        [ForeignKey(nameof(AdministeredByUserID))]
-        public virtual Personnel AdministeredBy { get; set; }
+        [ForeignKey(nameof(TimelineID))]
+        public virtual VaccinationTimeline? Timeline { get; set; }
+
+        [ForeignKey(nameof(AdministeredByPersonnelID))]
+        public virtual Personnel? AdministeredBy { get; set; }
+
+        [ForeignKey(nameof(DoctorDiagnosedByPersonnelID))]
+        public virtual Personnel? DoctorDiagnosedBy { get; set; }
     }
 }

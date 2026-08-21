@@ -22,13 +22,21 @@ import axios from "axios";
 ========================================================================= */
 const API_BASE = "http://localhost:57147/api";
 const api = {
-  getAllParents:            ()            => axios.get(`${API_BASE}/Parents/all`).then(r => r.data),
-  createParent:             (payload)     => axios.post(`${API_BASE}/Parents`, payload).then(r => r.data),
-  updateParent:             (id, payload) => axios.put(`${API_BASE}/Parents/${id}`, payload).then(r => r.data),
-  getAllChildren:           ()            => axios.get(`${API_BASE}/Children/all`).then(r => r.data),
-  getChildrenByParent:      (parentId)    => axios.get(`${API_BASE}/Children/parent/${parentId}`).then(r => r.data),
-  createChild:              (payload)     => axios.post(`${API_BASE}/Children`, payload).then(r => r.data),
-  updateChild:              (id, payload) => axios.put(`${API_BASE}/Children/${id}`, payload).then(r => r.data),
+  getAllParents:                ()            => axios.get(`${API_BASE}/Parents/all`).then(r => r.data),
+  createParent:                 (payload)     => axios.post(`${API_BASE}/Parents`, payload).then(r => r.data),
+  updateParent:                 (id, payload) => axios.put(`${API_BASE}/Parents/${id}`, payload).then(r => r.data),
+  getAllChildren:               ()            => axios.get(`${API_BASE}/Children/all`).then(r => r.data),
+  getChildrenByParent:          (parentId)    => axios.get(`${API_BASE}/Children/parent/${parentId}`).then(r => r.data),
+  createChild:                  (payload)     => axios.post(`${API_BASE}/Children`, payload).then(r => r.data),
+  updateChild:                  (id, payload) => axios.put(`${API_BASE}/Children/${id}`, payload).then(r => r.data),
+  getChildVaccinations:         (childId)     => axios.get(`${API_BASE}/VaccinationRecords/child/${childId}`).then(r => r.data),
+  saveHistoricalVaccinations:   (payload)     => axios.post(`${API_BASE}/VaccinationRecords/historical`, payload).then(r => r.data),
+
+  // Real Child <-> Parent/Guardian relationship API
+  getRelationshipsByChild:      (childId)     => axios.get(`${API_BASE}/ChildParentRelationships/child/${childId}`).then(r => r.data),
+  getRelationshipsByParent:     (parentId)    => axios.get(`${API_BASE}/ChildParentRelationships/parent/${parentId}`).then(r => r.data),
+  createRelationship:           (payload)     => axios.post(`${API_BASE}/ChildParentRelationships`, payload).then(r => r.data),
+  deleteRelationship:           (relationshipId) => axios.delete(`${API_BASE}/ChildParentRelationships/${relationshipId}`).then(r => r.data),
 };
 
 /* ---------- tiny render-fn components (badge / avatar markup, used everywhere) ---------- */
@@ -47,7 +55,8 @@ const error = ref(null);
 const activeTab = ref("parents"); // "parents" | "children"
 
 const navItems = [
-  { icon:Home, label:"Dashboard" }, { icon:Users, label:"User Management", active:true },
+  { icon:Home, label:"Dashboard" }, 
+  { icon:Users, label:"Patient Management", active:true },
   { icon:Syringe, label:"Vaccine Schedule" }, { icon:Package, label:"Inventory" },
   { icon:ClipboardList, label:"Queue Management" }, { icon:Bell, label:"Notifications" },
   { icon:BarChart2, label:"Clinic Reports" }, { icon:Settings, label:"Settings" },
@@ -55,6 +64,23 @@ const navItems = [
 
 const relationshipOptions = ["Mother","Father","Guardian","Grandparent","Foster Parent","Other Authorized Guardian"];
 const linkRelationshipOptions = ["Mother","Father","Guardian","Grandmother","Grandfather","Aunt","Uncle","Sibling","Foster Parent","Relative","Other"];
+
+// NOTE: no vaccine list endpoint/service exists elsewhere in this file, so the known
+// vaccine catalog is defined here. If a shared vaccine service/dropdown is added later,
+// swap this constant out for that service's data instead of maintaining two lists.
+const VACCINE_OPTIONS = [
+  { id:1,  name:"BCG Vaccine" },
+  { id:2,  name:"Hepatitis B Vaccine" },
+  { id:3,  name:"Pentavalent Vaccine (DPT-Hep B-HIB)" },
+  { id:4,  name:"Oral Polio Vaccine (OPV)" },
+  { id:5,  name:"Inactivated Polio Vaccine (IPV)" },
+  { id:6,  name:"Pneumococcal Conjugate Vaccine (PCV)" },
+  { id:7,  name:"Measles, Mumps, Rubella Vaccine (MMR)" },
+  { id:9,  name:"BCG" },
+  { id:10, name:"Covid" },
+  { id:11, name:"Pneumoccal Conjugate Vaccine" },
+];
+const vaccineNameById = (id) => VACCINE_OPTIONS.find(v => v.id === Number(id))?.name || `Vaccine #${id}`;
 
 /* ============================= Core data (loaded from API) ============================= */
 const parents = ref([]);
@@ -121,6 +147,9 @@ async function loadAll() {
         children.value = Array.isArray(cd)
             ? cd.map(mapChild)
             : [];
+
+        // Load actual parent-child links after children are available.
+        await loadRelationships();
     }
     catch (e) {
         console.error(e);
@@ -134,32 +163,83 @@ async function loadAll() {
 
 
 
-let relCounter = 6;
-const relationships = ref([
-  { id:"REL-001", parentId:"PR-2201", childId:"PT-10214", relationship:"Mother", isPrimary:true, status:"Active", createdDate:"Apr 12, 2023" },
-  { id:"REL-002", parentId:"PR-2270", childId:"PT-10214", relationship:"Grandmother", isPrimary:false, status:"Active", createdDate:"May 01, 2023" },
-  { id:"REL-003", parentId:"PR-2201", childId:"PT-10231", relationship:"Mother", isPrimary:true, status:"Active", createdDate:"Jan 05, 2026" },
-  { id:"REL-004", parentId:"PR-2214", childId:"PT-10216", relationship:"Guardian", isPrimary:true, status:"Active", createdDate:"Nov 05, 2025" },
-  { id:"REL-005", parentId:"PR-2229", childId:"PT-10215", relationship:"Father", isPrimary:true, status:"Active", createdDate:"Jun 10, 2024" },
-  // PT-10250 Rafael Domingo intentionally has no relationships yet ("Not linked")
-]);
+// Relationships are loaded from the real ChildParentRelationships API.
+// The old demo REL-001...REL-005 records have intentionally been removed.
+const relationships = ref([]);
+
+function mapRelationship(r) {
+  return {
+    id: r.relationshipID,
+    parentId: r.parentID,
+    childId: r.childID,
+    relationship: r.relationshipType,
+    isPrimary: !!r.isPrimaryContact,
+    canReceiveNotifications: r.canReceiveNotifications !== false,
+    status: r.status || "Active",
+    createdDate: r.createdAt
+      ? new Date(r.createdAt).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric"
+        })
+      : "—",
+    raw: r,
+  };
+}
+
+async function loadRelationships() {
+  if (!children.value.length) {
+    relationships.value = [];
+    return;
+  }
+
+  try {
+    const results = await Promise.all(
+      children.value.map(child => api.getRelationshipsByChild(child.id))
+    );
+
+    relationships.value = results
+      .flatMap(result => Array.isArray(result) ? result : [])
+      .map(mapRelationship)
+      .filter(r => r.status === "Active");
+
+    console.log("Relationships loaded from API:", relationships.value);
+  } catch (e) {
+    console.error("Error loading parent-child relationships:", e);
+    relationships.value = [];
+  }
+}
 
 /* -- relationship helpers: everything about "who is linked to whom" flows through these -- */
-const relationshipsOfChild  = (child)  => relationships.value.filter(r => r.childId===child.id && r.status==="Active");
-const relationshipsOfParent = (parent) => relationships.value.filter(r => r.parentId===parent.id && r.status==="Active");
+const relationshipsOfChild = (child) =>
+  relationships.value.filter(r => r.childId === child.id && r.status === "Active");
+
+const relationshipsOfParent = (parent) =>
+  relationships.value.filter(r => r.parentId === parent.id && r.status === "Active");
+
 const linkedAccountsOf = (child) => relationshipsOfChild(child)
-  .map(rel => ({ rel, parent: parents.value.find(p=>p.id===rel.parentId) })).filter(x=>x.parent)
-  .sort((a,b)=>(b.rel.isPrimary?1:0)-(a.rel.isPrimary?1:0));
+  .map(rel => ({
+    rel,
+    parent: parents.value.find(p => p.id === rel.parentId)
+  }))
+  .filter(x => x.parent)
+  .sort((a, b) => (b.rel.isPrimary ? 1 : 0) - (a.rel.isPrimary ? 1 : 0));
+
 const childrenOf = (parent) => relationshipsOfParent(parent)
-  .map(rel => ({ rel, child: children.value.find(c=>c.id===rel.childId) })).filter(x=>x.child);
-function setPrimary(childId, relId) { relationships.value.forEach(r => { if (r.childId===childId && r.status==="Active") r.isPrimary = r.id===relId; }); }
-function addRelationship({ parentId, childId, relationship, isPrimary }) {
-  relCounter++;
-  if (isPrimary) setPrimary(childId, null);
-  const rel = { id:`REL-${String(relCounter).padStart(3,"0")}`, parentId, childId, relationship, isPrimary, status:"Active", createdDate:"Today" };
-  relationships.value.push(rel);
-  if (isPrimary) setPrimary(childId, rel.id);
-  return rel;
+  .map(rel => ({
+    rel,
+    child: children.value.find(c => c.id === rel.childId)
+  }))
+  .filter(x => x.child);
+
+function setPrimary(childId, relId) {
+  // The current backend does not yet expose a PUT/PATCH endpoint for
+  // changing IsPrimaryContact. Keep this as a local UI change for now.
+  relationships.value.forEach(r => {
+    if (r.childId === childId && r.status === "Active") {
+      r.isPrimary = r.id === relId;
+    }
+  });
 }
 
 /* ============================= Summary cards (per tab) ============================= */
@@ -229,6 +309,7 @@ const parentMenuItems = [
 const childMenuItems = [
   { icon:Link2, label:"Link Parent / Guardian", action:(c)=>openPicker("linkParent",{child:c}) },
   { icon:UserCircle2, label:"Manage Linked Accounts", action:(c)=>viewChild(c) },
+  { icon:Syringe, label:"Add Historical Vaccination Records", action:(c)=>{ selectedChild.value=c; loadChildVaccinations(c.id); openHistoricalModal(); } },
   { divider:true },
   { icon:ArchiveIcon, label:"Archive", class:"text-rose-700 hover:bg-rose-50", action:()=>{} },
 ];
@@ -244,10 +325,101 @@ function viewParent(p) { selectedParent.value=p; showParentDrawer.value=true; ac
 const showChildDrawer = ref(false);
 const selectedChild = ref(null);
 const removeConfirmId = ref(null); // relationship id currently showing the "remove?" confirm buttons
-function viewChild(c) { selectedChild.value=c; showChildDrawer.value=true; actionsMenuOpenFor.value=null; removeConfirmId.value=null; }
+
+/* ============================= Vaccination history (per child) ============================= */
+const vaccinationRecordsByChild = ref({}); // { [childId]: VaccinationRecordDTO[] }
+const vaccinationLoading = ref(false);
+const selectedChildVaccinations = computed(() => vaccinationRecordsByChild.value[selectedChild.value?.id] || []);
+
+function formatVaccDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso).slice(0,10) : d.toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"});
+}
+
+async function loadChildVaccinations(childId) {
+  if (!childId) return;
+  vaccinationLoading.value = true;
+  try {
+    const data = await api.getChildVaccinations(childId);
+    vaccinationRecordsByChild.value = { ...vaccinationRecordsByChild.value, [childId]: Array.isArray(data) ? data : [] };
+  } catch (e) {
+    console.error("Error loading vaccination records:", e);
+  } finally {
+    vaccinationLoading.value = false;
+  }
+}
+
+/* -- Historical Vaccination Records modal -- */
+function emptyHistoricalRow() { return { vaccineID:"", doseNumber:1, vaccinationDate:"" }; }
+const historicalModal = ref({ open:false, rows:[emptyHistoricalRow()], error:null, submitting:false, success:false });
+
+function openHistoricalModal() {
+  historicalModal.value = { open:true, rows:[emptyHistoricalRow()], error:null, submitting:false, success:false };
+  actionsMenuOpenFor.value = null;
+}
+const closeHistoricalModal = () => (historicalModal.value.open = false);
+const addHistoricalRow = () => historicalModal.value.rows.push(emptyHistoricalRow());
+function removeHistoricalRow(idx) {
+  historicalModal.value.rows.splice(idx, 1);
+  if (historicalModal.value.rows.length === 0) historicalModal.value.rows.push(emptyHistoricalRow());
+}
+
+async function submitHistoricalVaccinations() {
+  const m = historicalModal.value;
+  m.error = null;
+
+  if (!selectedChild.value?.id) { m.error = "Select a child first."; return; }
+  if (!m.rows.length) { m.error = "Add at least one vaccination record."; return; }
+
+  for (const row of m.rows) {
+    if (!row.vaccineID) { m.error = "Every row needs a vaccine selected."; return; }
+    if (!row.doseNumber || Number(row.doseNumber) <= 0) { m.error = "Dose number must be greater than 0."; return; }
+    if (!row.vaccinationDate) { m.error = "Every row needs a vaccination date."; return; }
+  }
+  // prevent obvious accidental duplicates: same vaccine + dose + date entered twice in this submission
+  const seen = new Set();
+  for (const row of m.rows) {
+    const key = `${row.vaccineID}-${row.doseNumber}-${row.vaccinationDate}`;
+    if (seen.has(key)) { m.error = "Duplicate vaccine/dose/date rows found — please review your entries."; return; }
+    seen.add(key);
+  }
+
+  m.submitting = true;
+  try {
+    await api.saveHistoricalVaccinations({
+      childID: selectedChild.value.id,
+      vaccinations: m.rows.map(row => ({
+        vaccineID: Number(row.vaccineID),
+        doseNumber: Number(row.doseNumber),
+        vaccinationDate: row.vaccinationDate,
+      })),
+    });
+    m.success = true;
+    m.rows = [emptyHistoricalRow()];
+    await loadChildVaccinations(selectedChild.value.id);
+  } catch (e) {
+    console.error("Error saving historical vaccinations:", e);
+    m.error = `Save failed: ${e.response?.data?.message || e.message}`;
+  } finally {
+    m.submitting = false;
+  }
+}
+function viewChild(c) { selectedChild.value=c; showChildDrawer.value=true; actionsMenuOpenFor.value=null; removeConfirmId.value=null; loadChildVaccinations(c.id); }
 const askRemoveAccount = (rel) => (removeConfirmId.value = rel.id);
 const cancelRemoveAccount = () => (removeConfirmId.value = null);
-const confirmRemoveAccount = (rel) => { rel.status="Removed"; removeConfirmId.value=null; }; // soft-remove only
+
+async function confirmRemoveAccount(rel) {
+  try {
+    await api.deleteRelationship(rel.id);
+    await loadRelationships();
+    removeConfirmId.value = null;
+  } catch (e) {
+    console.error("Error removing parent-child relationship:", e);
+    error.value = `Remove failed: ${e.response?.data?.message || e.message}`;
+    removeConfirmId.value = null;
+  }
+}
 
 /* -- Linked Accounts quick-view modal (from the child table cell) -- */
 const showLinkedAccountsModal = ref(false);
@@ -265,9 +437,42 @@ const PICKER_CONFIG = {
   linkParent: { title:"Link Parent / Guardian", searchPlaceholder:"Search by Parent ID, Name, Phone, or Email...",     showPrimary:true },
   transfer:   { title:"Transfer Guardian",      searchPlaceholder:"Search for a parent account...",                    showPrimary:false },
 };
-const picker = ref({ open:false, mode:null, query:"", selected:null, relationship:"", isPrimary:false, parent:null, child:null, rel:null });
-function openPicker(mode, ctx={}) { picker.value = { open:true, mode, query:"", selected:null, relationship:"", isPrimary:false, parent:null, child:null, rel:null, ...ctx }; actionsMenuOpenFor.value=null; }
-const closePicker = () => (picker.value.open = false);
+const picker = ref({
+  open:false,
+  mode:null,
+  query:"",
+  selected:null,
+  relationship:"",
+  isPrimary:false,
+  parent:null,
+  child:null,
+  rel:null,
+  submitting:false,
+  error:null
+});
+
+function openPicker(mode, ctx={}) {
+  picker.value = {
+    open:true,
+    mode,
+    query:"",
+    selected:null,
+    relationship:"",
+    isPrimary:false,
+    parent:null,
+    child:null,
+    rel:null,
+    submitting:false,
+    error:null,
+    ...ctx
+  };
+  actionsMenuOpenFor.value=null;
+}
+
+const closePicker = () => {
+  if (picker.value.submitting) return;
+  picker.value.open = false;
+};
 
 const pickerResults = computed(() => {
   const s = picker.value, q = s.query.trim().toLowerCase();
@@ -287,19 +492,61 @@ const pickerResults = computed(() => {
   }
   return [];
 });
-function confirmPicker() {
+async function confirmPicker() {
   const s = picker.value;
+
   if (!s.selected || !s.relationship) return;
-  if (s.mode==="transfer") {
-    const wasPrimary = s.rel.isPrimary;
-    s.rel.status = "Removed"; // old link retired; child's medical history untouched
-    addRelationship({ parentId:s.selected.id, childId:s.rel.childId, relationship:s.relationship, isPrimary:wasPrimary });
-  } else {
-    const parentId = s.mode==="linkChild" ? s.parent.id : s.selected.id;
-    const childId  = s.mode==="linkChild" ? s.selected.id : s.child.id;
-    addRelationship({ parentId, childId, relationship:s.relationship, isPrimary:s.isPrimary });
+
+  s.error = null;
+  s.submitting = true;
+
+  try {
+    if (s.mode === "transfer") {
+      // Transfer = deactivate old relationship, then create the new one.
+      await api.deleteRelationship(s.rel.id);
+
+      await api.createRelationship({
+        childID: s.rel.childId,
+        parentID: s.selected.id,
+        relationshipType: s.relationship,
+        isPrimaryContact: !!s.rel.isPrimary,
+        canReceiveNotifications: s.rel.canReceiveNotifications !== false
+      });
+    } else {
+      const parentId = s.mode === "linkChild"
+        ? s.parent.id
+        : s.selected.id;
+
+      const childId = s.mode === "linkChild"
+        ? s.selected.id
+        : s.child.id;
+
+      // This is the real API call that creates the link.
+      await api.createRelationship({
+        childID: childId,
+        parentID: parentId,
+        relationshipType: s.relationship,
+        isPrimaryContact: !!s.isPrimary,
+        canReceiveNotifications: true
+      });
+    }
+
+    // Re-read the database so the UI is never relying on fake/local links.
+    await loadRelationships();
+
+    // Keep the currently opened child drawer showing the fresh relationship list.
+    if (selectedChild.value?.id) {
+      const freshChild = children.value.find(c => c.id === selectedChild.value.id);
+      if (freshChild) selectedChild.value = freshChild;
+    }
+
+    closePicker();
+  } catch (e) {
+    console.error("Error saving parent-child relationship:", e);
+    s.error = `Link failed: ${e.response?.data?.message || e.message}`;
+  } finally {
+    s.submitting = false;
   }
-  closePicker();
 }
 
 /* =========================================================================
@@ -436,7 +683,7 @@ function fieldRows(fields) {
     <!-- ---------------- Main ---------------- -->
     <main class="flex-1 min-w-0">
       <header class="flex items-center justify-between px-8 py-5 border-b border-stone-200 bg-white">
-        <div><h1 class="text-[22px] font-bold">User Management</h1><p class="text-[12.5px] mt-0.5 text-stone-500">Dashboard &gt; User Management</p></div>
+        <div><h1 class="text-[22px] font-bold">Patient Management</h1><p class="text-[12.5px] mt-0.5 text-stone-500">Dashboard &gt; Patient Management</p></div>
         <div class="flex items-center gap-3">
           <button class="relative flex h-9 w-9 items-center justify-center rounded-full bg-stone-50"><Bell :size="17" class="text-stone-500" /><span class="absolute top-1.5 right-2 h-1.5 w-1.5 rounded-full bg-rose-600" /></button>
           <button class="flex h-9 w-9 items-center justify-center rounded-full bg-stone-50"><Settings :size="17" class="text-stone-500" /></button>
@@ -653,6 +900,34 @@ function fieldRows(fields) {
               <div class="flex items-center justify-between"><span class="text-[12px] text-stone-500">Next Vaccine</span><span class="text-[13px] font-medium">{{ selectedChild.nextVaccine }}</span></div>
             </div>
           </div>
+
+          <!-- Vaccination History (incl. historical records entered before Aruga registration) -->
+          <div class="border-t border-stone-200 pt-5">
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-[13px] font-semibold">Vaccination History</p>
+              <button @click="openHistoricalModal" class="flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-2.5 py-1.5 text-[11.5px] font-semibold"><Syringe :size="13" /> Add Historical Record</button>
+            </div>
+            <p v-if="vaccinationLoading" class="text-[12px] text-stone-500 py-2">Loading vaccination records...</p>
+            <div v-else-if="selectedChildVaccinations.length" class="rounded-xl border border-stone-200 overflow-hidden">
+              <table class="w-full text-[12.5px]">
+                <thead><tr class="bg-stone-50">
+                  <th class="text-left font-semibold px-3 py-2 text-[10.5px] uppercase tracking-wide text-stone-500">Vaccine</th>
+                  <th class="text-left font-semibold px-3 py-2 text-[10.5px] uppercase tracking-wide text-stone-500">Dose</th>
+                  <th class="text-left font-semibold px-3 py-2 text-[10.5px] uppercase tracking-wide text-stone-500">Date</th>
+                  <th class="text-left font-semibold px-3 py-2 text-[10.5px] uppercase tracking-wide text-stone-500">Status</th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="v in selectedChildVaccinations" :key="v.vaccinationRecordID" class="border-t border-stone-200">
+                    <td class="px-3 py-2">{{ v.vaccineName || vaccineNameById(v.vaccineID) }}</td>
+                    <td class="px-3 py-2">{{ v.doseNumber }}</td>
+                    <td class="px-3 py-2">{{ formatVaccDate(v.vaccinationDate) }}</td>
+                    <td class="px-3 py-2"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium bg-emerald-50 text-emerald-700">{{ v.status }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="rounded-xl bg-stone-50 p-3.5 text-[12.5px] text-stone-500">No vaccination records yet.</p>
+          </div>
           <!-- Parent / Guardian Accounts (the many-to-many bit) -->
           <div class="border-t border-stone-200 pt-5">
             <div class="flex items-center justify-between mb-1"><p class="text-[13px] font-semibold">Parent / Guardian Accounts</p><span class="text-[11px] text-stone-500">{{ linkedAccountsOf(selectedChild).length }} linked</span></div>
@@ -733,10 +1008,17 @@ function fieldRows(fields) {
             <input type="checkbox" v-model="picker.isPrimary" class="rounded border-stone-300 text-emerald-600 focus:ring-emerald-500" /> Set as Primary Contact for this child
           </label>
         </div>
+        <div v-if="picker.error" class="mx-6 mb-3 rounded-xl bg-rose-50 p-3 text-[12px] text-rose-700">
+          {{ picker.error }}
+        </div>
         <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-stone-200">
-          <button @click="closePicker" class="rounded-xl px-4 py-2.5 text-[13px] font-medium text-stone-600 hover:bg-stone-50">Cancel</button>
-          <button :disabled="!picker.selected || !picker.relationship" @click="confirmPicker" class="rounded-xl px-5 py-2.5 text-[13px] font-semibold text-white bg-emerald-700 hover:bg-emerald-800 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
-            {{ picker.mode === 'transfer' ? 'Confirm Transfer' : 'Confirm Link' }}
+          <button :disabled="picker.submitting" @click="closePicker" class="rounded-xl px-4 py-2.5 text-[13px] font-medium text-stone-600 hover:bg-stone-50 disabled:opacity-40">Cancel</button>
+          <button
+            :disabled="!picker.selected || !picker.relationship || picker.submitting"
+            @click="confirmPicker"
+            class="rounded-xl px-5 py-2.5 text-[13px] font-semibold text-white bg-emerald-700 hover:bg-emerald-800 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {{ picker.submitting ? 'Saving...' : (picker.mode === 'transfer' ? 'Confirm Transfer' : 'Confirm Link') }}
           </button>
         </div>
       </div>
@@ -806,6 +1088,61 @@ function fieldRows(fields) {
         <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-stone-200">
           <button @click="editModal.open = false" class="rounded-xl px-4 py-2.5 text-[13px] font-medium text-stone-600 hover:bg-stone-50">Cancel</button>
           <button @click="submitEdit" class="rounded-xl px-5 py-2.5 text-[13px] font-semibold text-white bg-emerald-700 hover:bg-emerald-800 shadow-sm">Save Changes</button>
+        </div>
+      </div>
+    </div>
+    <!-- HISTORICAL VACCINATION RECORDS MODAL -->
+    <div v-if="historicalModal.open" class="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 px-4">
+      <div class="w-full max-w-xl rounded-2xl bg-white shadow-xl max-h-[88vh] overflow-y-auto">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-stone-200">
+          <div>
+            <p class="text-[16px] font-semibold">Historical Vaccination Records</p>
+            <p class="text-[11.5px] text-stone-500 mt-0.5" v-if="selectedChild">{{ selectedChild.name }} · {{ selectedChild.id }}</p>
+          </div>
+          <button @click="closeHistoricalModal" class="p-1.5 rounded-lg hover:bg-stone-100"><X :size="18" class="text-stone-500" /></button>
+        </div>
+
+        <div v-if="!historicalModal.success" class="p-6 space-y-4">
+          <p class="text-[12px] text-stone-500 -mt-1">Record vaccinations this child received before being managed in Aruga.</p>
+
+          <div v-for="(row, idx) in historicalModal.rows" :key="idx" class="rounded-xl border border-stone-200 p-3.5 space-y-3">
+            <div class="flex items-center justify-between">
+              <p class="text-[11.5px] font-semibold text-stone-500">Vaccination {{ idx + 1 }}</p>
+              <button v-if="historicalModal.rows.length > 1" @click="removeHistoricalRow(idx)" class="flex items-center gap-1 text-[11.5px] font-medium text-rose-700 hover:bg-rose-50 rounded-lg px-2 py-1"><Trash2 :size="12" /> Remove</button>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <select v-model="row.vaccineID" class="col-span-2 rounded-xl border border-stone-200 px-3 py-2.5 text-[13px] outline-none focus:border-emerald-500">
+                <option value="" disabled>Select Vaccine</option>
+                <option v-for="v in VACCINE_OPTIONS" :key="v.id" :value="v.id">{{ v.name }}</option>
+              </select>
+              <div>
+                <label class="text-[11px] font-medium text-stone-500">Dose Number</label>
+                <input v-model.number="row.doseNumber" type="number" min="1" class="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5 text-[13px] outline-none focus:border-emerald-500" />
+              </div>
+              <div>
+                <label class="text-[11px] font-medium text-stone-500">Vaccination Date</label>
+                <input v-model="row.vaccinationDate" type="date" class="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5 text-[13px] outline-none focus:border-emerald-500" />
+              </div>
+            </div>
+          </div>
+
+          <button @click="addHistoricalRow" class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-stone-300 px-3 py-2.5 text-[12.5px] font-medium text-emerald-700 hover:bg-emerald-50"><Syringe :size="14" /> Add Another Vaccination</button>
+
+          <div v-if="historicalModal.error" class="rounded-xl bg-rose-50 p-3 text-[12px] text-rose-700">{{ historicalModal.error }}</div>
+        </div>
+
+        <div v-else class="p-6 text-center py-10">
+          <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 mx-auto mb-4"><Check :size="26" class="text-emerald-700" /></div>
+          <p class="text-[15px] font-semibold mb-1">Historical vaccination records saved successfully.</p>
+          <p class="text-[13px] text-stone-500 mb-5">The child's vaccination history has been updated.</p>
+          <button @click="closeHistoricalModal" class="rounded-xl px-5 py-2.5 text-[13px] font-semibold text-white bg-emerald-700 hover:bg-emerald-800">Done</button>
+        </div>
+
+        <div v-if="!historicalModal.success" class="flex items-center justify-end gap-3 px-6 py-4 border-t border-stone-200">
+          <button @click="closeHistoricalModal" class="rounded-xl px-4 py-2.5 text-[13px] font-medium text-stone-600 hover:bg-stone-50">Cancel</button>
+          <button :disabled="historicalModal.submitting" @click="submitHistoricalVaccinations" class="rounded-xl px-5 py-2.5 text-[13px] font-semibold text-white bg-emerald-700 hover:bg-emerald-800 shadow-sm disabled:opacity-50">
+            {{ historicalModal.submitting ? "Saving..." : "Save Historical Vaccinations" }}
+          </button>
         </div>
       </div>
     </div>

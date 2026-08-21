@@ -130,10 +130,96 @@ namespace AndroidWebAPI.Controllers
 
         // ── READ: GET /api/Children/all ────────────────────────────
         [HttpGet("all")]
-        public async Task<IActionResult> GetAllChildren()
+public async Task<IActionResult> GetAllChildren()
+{
+    try
+    {
+        var children = await _repository.GetAllAsync();
+
+        var result = children.Select(c => new
         {
-            var children = await _repository.GetAllAsync();
-            return Ok(children);
+            childID = c.ChildID,
+            firstName = c.FirstName,
+            middleName = c.MiddleName,
+            lastName = c.LastName,
+            birthDate = c.BirthDate,
+            placeOfBirth = c.PlaceOfBirth,
+            address = c.Address,
+            healthCenter = c.HealthCenter,
+            barangay = c.Barangay,
+            sex = c.Sex,
+
+            parents = c.ParentRelationships.Select(r => new
+            {
+                parentID = r.ParentID,
+                relationshipType = r.RelationshipType,
+                isPrimaryContact = r.IsPrimaryContact,
+                canReceiveNotifications = r.CanReceiveNotifications
+            })
+        });
+
+        return Ok(result);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, new
+        {
+            message = "An error occurred while retrieving children.",
+            error = ex.Message
+        });
+    }
+}
+
+// ── READ: GET /api/Children/{id} ─────────────────────────────
+[HttpGet("{id}")]
+public async Task<IActionResult> GetChildById(Guid id)
+{
+    try
+    {
+        var children = await _repository.GetAllAsync();
+
+        var child = children.FirstOrDefault(c => c.ChildID == id);
+
+        if (child == null)
+        {
+            return NotFound(new
+            {
+                message = "Child not found."
+            });
         }
+
+        var result = new
+        {
+            childID = child.ChildID,
+            firstName = child.FirstName,
+            middleName = child.MiddleName,
+            lastName = child.LastName,
+            birthDate = child.BirthDate,
+            placeOfBirth = child.PlaceOfBirth,
+            address = child.Address,
+            healthCenter = child.HealthCenter,
+            barangay = child.Barangay,
+            sex = child.Sex,
+
+            parents = child.ParentRelationships.Select(r => new
+            {
+                parentID = r.ParentID,
+                relationshipType = r.RelationshipType,
+                isPrimaryContact = r.IsPrimaryContact,
+                canReceiveNotifications = r.CanReceiveNotifications
+            })
+        };
+
+        return Ok(result);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, new
+        {
+            message = "An error occurred while retrieving the child.",
+            error = ex.Message
+        });
+    }
+}
     }
 }
