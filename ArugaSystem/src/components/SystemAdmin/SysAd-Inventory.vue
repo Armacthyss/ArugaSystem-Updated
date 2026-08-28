@@ -1,361 +1,490 @@
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
+import axios from 'axios'
+import AppSidebar from './Components/AppSidebar.vue'
+import AppHeader from './Components/AppHeader.vue'
 
-/* ----------------------------- Sidebar state ------------------------------ */
-const isCollapsed = ref(false)
-const toggleSidebar = () => (isCollapsed.value = !isCollapsed.value)
+/* =========================================================================
+   API LAYER
+   Talks to VaccinesController + VaccineInventoryController from your
+   AndroidWebAPI project. Endpoints/contract are unchanged from your code.
 
-const navItems = [
-  { label: 'Dashboard', icon: '🏠' },
-  { label: 'User Management', icon: '👥' },
-  { label: 'Patient Management', icon: '🧒' },
-  { label: 'Vaccine Management', icon: '💉' },
-  { label: 'Inventory', icon: '📦' },
-  { label: 'Notifications', icon: '🔔' },
-  { label: 'Reports', icon: '📊' },
-  { label: 'Audit Logs', icon: '📋' },
-  { label: 'Settings', icon: '⚙️' },
-]
+   ASSUMPTIONS CARRIED OVER FROM YOUR ORIGINAL FILE (please check these
+   against your actual DTOs and change the one-liners if they don't match):
+
+   1. VaccineInventory lifecycle flag is sent/received under JSON key
+      `status` (boolean). true = active, false = inactive.
+
+   2. Vaccine itself ALSO has a lifecycle flag. Your posted VaccinesController
+      doesn't show the Vaccine model, so I couldn't confirm the exact field
+      name. `isVaccineActive()` below checks a few common possibilities
+      (`status`, `isActive`, `active`) and falls back to "active" if none of
+      them are present, so nothing silently disappears from the dropdown if
+      your API doesn't send this field at all. If your Vaccine model uses a
+      different property name (e.g. `IsActive` serialized differently),
+      update the one line inside isVaccineActive().
+========================================================================= */
+const API_BASE = 'http://localhost:57147/api'
+const api = {
+  getInventory:          ()          => axios.get(`${API_BASE}/VaccineInventory`).then(r => r.data),
+  getInventoryByVaccine: (vaccineId) => axios.get(`${API_BASE}/VaccineInventory/vaccine/${vaccineId}`).then(r => r.data),
+  createInventory:       (payload)   => axios.post(`${API_BASE}/VaccineInventory`, payload).then(r => r.data),
+  updateInventory:       (id, payload) => axios.put(`${API_BASE}/VaccineInventory/${id}`, payload).then(r => r.data),
+  getVaccines:           ()          => axios.get(`${API_BASE}/Vaccines`).then(r => r.data),
+}
+
+/* -------------------------- Layout state (page-level) -------------------------- */
+// Sidebar owns its own collapse state internally now. This page only needs
+// to know/track which nav item is active — pass this to AppSidebar as a
+// v-model. Swap this for vue-router's current route once that's wired up.
 const activeNav = ref('Inventory')
+function handleLogout() {
+  // Hook up real logout / redirect logic here.
+  console.log('logout clicked')
+}
 
 /* -------------------------------- Status meta -------------------------------- */
 const statusMeta = {
-  Healthy: { tint: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-  'Low Stock': { tint: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500' },
-  Critical: { tint: 'bg-red-50', text: 'text-red-700', dot: 'bg-red-500' },
-  Expired: { tint: 'bg-red-200', text: 'text-red-900', dot: 'bg-red-800' },
+  Healthy:     { tint: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+  'Low Stock': { tint: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-500' },
+  Expired:     { tint: 'bg-red-100',    text: 'text-red-800',     dot: 'bg-red-700' },
 }
 
-const vaccineOptions = [
-  'BCG', 'Hepatitis B', 'Pentavalent', 'OPV', 'IPV', 'PCV', 'MMR', 'MMR-2', 'DPT Booster', 'Japanese Encephalitis',
-]
+/* ============================= Core data (loaded from API) ============================= */
+const inventory = ref([])   // raw VaccineInventory rows
+const vaccines = ref([])    // raw Vaccine rows
+const isLoading = ref(false)
+const isSaving = ref(false)
+const error = ref(null)
 
-/* -------------------------------- Batch data -------------------------------- */
-const batches = ref([
-  {
-    id: 1, batchNumber: 'BT-2026-041', vaccine: 'BCG', manufacturer: 'Serum Institute of India', lotNumber: 'LOT-88214',
-    qtyReceived: 200, qtyRemaining: 18, expirationDate: 'Aug 02, 2026', dateReceived: 'Feb 10, 2026',
-    storageLocation: 'Fridge A - Shelf 1', status: 'Critical',
-    history: [
-      { date: 'Feb 10, 2026', action: 'Received', quantity: '+200', performedBy: 'Renzo Miguel', remarks: 'Initial stock delivery' },
-      { date: 'Mar 05, 2026 – Jul 09, 2026', action: 'Vaccinated', quantity: '-182', performedBy: 'Elena Cruz', remarks: 'Routine administration' },
-    ],
-  },
-  {
-    id: 2, batchNumber: 'BT-2026-052', vaccine: 'Hepatitis B', manufacturer: 'Bio Farma', lotNumber: 'LOT-77310',
-    qtyReceived: 150, qtyRemaining: 96, expirationDate: 'Oct 14, 2026', dateReceived: 'Mar 22, 2026',
-    storageLocation: 'Fridge A - Shelf 2', status: 'Healthy',
-    history: [
-      { date: 'Mar 22, 2026', action: 'Received', quantity: '+150', performedBy: 'Renzo Miguel', remarks: 'Initial stock delivery' },
-      { date: 'Mar 22, 2026 – Jul 08, 2026', action: 'Vaccinated', quantity: '-54', performedBy: 'Bea Fernandez', remarks: 'Routine administration' },
-    ],
-  },
-  {
-    id: 3, batchNumber: 'BT-2026-033', vaccine: 'Pentavalent', manufacturer: 'GSK', lotNumber: 'LOT-65120',
-    qtyReceived: 300, qtyRemaining: 41, expirationDate: 'Jul 25, 2026', dateReceived: 'Jan 18, 2026',
-    storageLocation: 'Fridge B - Shelf 1', status: 'Low Stock',
-    history: [
-      { date: 'Jan 18, 2026', action: 'Received', quantity: '+300', performedBy: 'Renzo Miguel', remarks: 'Quarterly delivery' },
-      { date: 'Jan 20, 2026 – Jul 10, 2026', action: 'Vaccinated', quantity: '-254', performedBy: 'Elena Cruz', remarks: 'Routine administration' },
-      { date: 'Jun 02, 2026', action: 'Adjusted', quantity: '-5', performedBy: 'Renzo Miguel', remarks: 'Damaged vials removed' },
-    ],
-  },
-  {
-    id: 4, batchNumber: 'BT-2025-198', vaccine: 'OPV', manufacturer: 'Bio Farma', lotNumber: 'LOT-51092',
-    qtyReceived: 250, qtyRemaining: 12, expirationDate: 'Jul 18, 2026', dateReceived: 'Oct 02, 2025',
-    storageLocation: 'Fridge B - Shelf 2', status: 'Critical',
-    history: [
-      { date: 'Oct 02, 2025', action: 'Received', quantity: '+250', performedBy: 'Renzo Miguel', remarks: 'Initial stock delivery' },
-      { date: 'Oct 05, 2025 – Jul 09, 2026', action: 'Vaccinated', quantity: '-238', performedBy: 'Bea Fernandez', remarks: 'Routine administration' },
-    ],
-  },
-  {
-    id: 5, batchNumber: 'BT-2025-176', vaccine: 'IPV', manufacturer: 'Sanofi Pasteur', lotNumber: 'LOT-44087',
-    qtyReceived: 120, qtyRemaining: 0, expirationDate: 'Jun 15, 2026', dateReceived: 'Sep 11, 2025',
-    storageLocation: 'Fridge B - Shelf 1', status: 'Expired',
-    history: [
-      { date: 'Sep 11, 2025', action: 'Received', quantity: '+120', performedBy: 'Renzo Miguel', remarks: 'Initial stock delivery' },
-      { date: 'Sep 15, 2025 – Jun 10, 2026', action: 'Vaccinated', quantity: '-112', performedBy: 'Elena Cruz', remarks: 'Routine administration' },
-      { date: 'Jun 15, 2026', action: 'Expired', quantity: '-8', performedBy: 'System', remarks: 'Remaining doses marked expired' },
-    ],
-  },
-  {
-    id: 6, batchNumber: 'BT-2026-061', vaccine: 'PCV', manufacturer: 'Pfizer', lotNumber: 'LOT-90211',
-    qtyReceived: 180, qtyRemaining: 143, expirationDate: 'Dec 20, 2026', dateReceived: 'May 06, 2026',
-    storageLocation: 'Fridge A - Shelf 3', status: 'Healthy',
-    history: [
-      { date: 'May 06, 2026', action: 'Received', quantity: '+180', performedBy: 'Renzo Miguel', remarks: 'Initial stock delivery' },
-      { date: 'May 08, 2026 – Jul 09, 2026', action: 'Vaccinated', quantity: '-37', performedBy: 'Bea Fernandez', remarks: 'Routine administration' },
-    ],
-  },
-  {
-    id: 7, batchNumber: 'BT-2026-058', vaccine: 'MMR', manufacturer: 'Merck', lotNumber: 'LOT-83456',
-    qtyReceived: 100, qtyRemaining: 27, expirationDate: 'Aug 09, 2026', dateReceived: 'Apr 14, 2026',
-    storageLocation: 'Fridge A - Shelf 2', status: 'Low Stock',
-    history: [
-      { date: 'Apr 14, 2026', action: 'Received', quantity: '+100', performedBy: 'Renzo Miguel', remarks: 'Initial stock delivery' },
-      { date: 'Apr 16, 2026 – Jul 07, 2026', action: 'Vaccinated', quantity: '-73', performedBy: 'Elena Cruz', remarks: 'Routine administration' },
-    ],
-  },
-  {
-    id: 8, batchNumber: 'BT-2026-070', vaccine: 'DPT Booster', manufacturer: 'GSK', lotNumber: 'LOT-99120',
-    qtyReceived: 90, qtyRemaining: 90, expirationDate: 'Jan 30, 2027', dateReceived: 'Jul 01, 2026',
-    storageLocation: 'Fridge B - Shelf 3', status: 'Healthy',
-    history: [
-      { date: 'Jul 01, 2026', action: 'Received', quantity: '+90', performedBy: 'Renzo Miguel', remarks: 'Initial stock delivery' },
-    ],
-  },
-])
+async function loadAll() {
+  isLoading.value = true
+  try {
+    const inv = await api.getInventory()
+    const vax = await api.getVaccines()
+
+    inventory.value = Array.isArray(inv) ? inv : inv.data || inv.items || []
+    vaccines.value  = Array.isArray(vax) ? vax : vax.data || vax.items || []
+    error.value = null
+  } catch (e) {
+    console.error(e)
+    error.value = 'Failed to load inventory. Please try again.'
+  } finally {
+    isLoading.value = false
+  }
+}
+onMounted(loadAll)
+
+/* ------------------------------ Derived helpers ------------------------------ */
+function vaccineName(vaccineId) {
+  const v = vaccines.value.find(v => v.vaccineID === vaccineId)
+  return v ? (v.vaccineName || '—') : '—'
+}
+function formatDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return isNaN(d) ? iso : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+function toDateInputValue(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d) ? String(iso).slice(0, 10) : d.toISOString().slice(0, 10)
+}
+const startOfToday = new Date(new Date().toDateString())
+function daysUntil(iso) {
+  const d = new Date(iso)
+  return Math.ceil((d - startOfToday) / 86400000)
+}
+// Batch status is always derived live from ExpirationDate / CurrentQuantity / MinimumStock.
+function computeStatus(item) {
+  if (daysUntil(item.expirationDate) < 0) return 'Expired'
+  if (item.currentQuantity <= item.minimumStock) return 'Low Stock'
+  return 'Healthy'
+}
+// isActive on a BATCH reads the boolean lifecycle flag (wire key: status).
+function isActive(item) {
+  return item.status !== false
+}
+function shouldRecommendDeactivation(item) {
+  return isActive(item) && computeStatus(item) === 'Expired' && (item.currentQuantity || 0) === 0
+}
+
+// isVaccineActive checks the VACCINE record itself (not a batch). Used to decide
+// whether a vaccine should be selectable when receiving a new batch.
+// See the assumptions note at the top of this file.
+function isVaccineActive(v) {
+  if (!v) return false
+  if (typeof v.status === 'boolean') return v.status
+  if (typeof v.isActive === 'boolean') return v.isActive
+  if (typeof v.active === 'boolean') return v.active
+  // Field not present on the DTO at all -> treat as active so nothing
+  // vanishes from the dropdown just because the API doesn't send this yet.
+  return true
+}
+
+// Only active vaccines may be picked when registering a new batch.
+const activeVaccines = computed(() => vaccines.value.filter(isVaccineActive))
 
 /* ---------------------------- Toolbar / filters ---------------------------- */
+// Filters intentionally list ALL vaccines (active + inactive) so existing
+// batches under a since-deactivated vaccine are still searchable/visible.
 const searchQuery = ref('')
-const vaccineFilter = ref('All Vaccines')
+const vaccineFilter = ref('All')
 const statusFilter = ref('All')
-const sortBy = ref('Expiration Date')
+const expirationFilter = ref('All') // All | Expiring Soon | Expired | Valid
+const activeFilter = ref('All')     // All | Active | Inactive (batch lifecycle)
 
-const parseDate = (d) => new Date(d.split(' – ')[0])
+const filteredInventory = computed(() => {
+  const list = Array.isArray(inventory.value) ? inventory.value : []
+  const q = searchQuery.value.trim().toLowerCase()
 
-const filteredBatches = computed(() => {
-  let list = batches.value.filter((b) => {
-    const q = searchQuery.value.trim().toLowerCase()
-    const matchesSearch = !q || b.vaccine.toLowerCase().includes(q) || b.batchNumber.toLowerCase().includes(q)
-    const matchesVaccine = vaccineFilter.value === 'All Vaccines' || b.vaccine === vaccineFilter.value
-    const matchesStatus = statusFilter.value === 'All' || b.status === statusFilter.value
-    return matchesSearch && matchesVaccine && matchesStatus
+  return list.filter(item => {
+    const status = computeStatus(item)
+
+    const matchesSearch =
+      !q ||
+      vaccineName(item.vaccineID).toLowerCase().includes(q) ||
+      (item.lotNumber || '').toLowerCase().includes(q) ||
+      (item.supplier || '').toLowerCase().includes(q)
+
+    const matchesVaccine = vaccineFilter.value === 'All' || item.vaccineID === vaccineFilter.value
+    const matchesStatus  = statusFilter.value === 'All' || status === statusFilter.value
+    const matchesActive =
+      activeFilter.value === 'All' ||
+      (activeFilter.value === 'Active' ? isActive(item) : !isActive(item))
+
+    let matchesExpiration = true
+    if (expirationFilter.value !== 'All') {
+      const days = daysUntil(item.expirationDate)
+      if (expirationFilter.value === 'Expiring Soon') matchesExpiration = days >= 0 && days <= 30
+      else if (expirationFilter.value === 'Expired')  matchesExpiration = days < 0
+      else if (expirationFilter.value === 'Valid')    matchesExpiration = days > 30
+    }
+
+    return matchesSearch && matchesVaccine && matchesStatus && matchesActive && matchesExpiration
   })
-
-  list = [...list].sort((a, b) => {
-    if (sortBy.value === 'Expiration Date') return parseDate(a.expirationDate) - parseDate(b.expirationDate)
-    if (sortBy.value === 'Date Received') return parseDate(b.dateReceived) - parseDate(a.dateReceived)
-    if (sortBy.value === 'Quantity Remaining') return a.qtyRemaining - b.qtyRemaining
-    return 0
-  })
-
-  return list
 })
 
-/* -------------------------------- Summary ---------------------------------- */
-const summary = computed(() => ({
-  totalBatches: batches.value.length,
-  totalDoses: batches.value.reduce((sum, b) => sum + b.qtyRemaining, 0),
-  lowStock: batches.value.filter((b) => b.status === 'Low Stock').length,
-  expiringSoon: batches.value.filter((b) => {
-    const days = Math.ceil((parseDate(b.expirationDate) - new Date('2026-07-11')) / 86400000)
-    return days >= 0 && days <= 30 && b.status !== 'Expired'
-  }).length,
-  expired: batches.value.filter((b) => b.status === 'Expired').length,
-  receivedThisMonth: batches.value.filter((b) => b.dateReceived.includes('Jul') && b.dateReceived.includes('2026')).length,
-}))
+/* ------------------------- Grouped by vaccine, FEFO within group -------------------------
+   e.g.
+     BCG Vaccine
+       - LOT-88214
+       - LOT-51092
+     Pentavalent Vaccine
+       - LOT-65120
+------------------------------------------------------------------------------------------- */
+const groupedInventory = computed(() => {
+  const map = new Map()
+  for (const item of filteredInventory.value) {
+    if (!map.has(item.vaccineID)) map.set(item.vaccineID, [])
+    map.get(item.vaccineID).push(item)
+  }
 
-/* ------------------------------ Alerts panel ---------------------------- */
-const daysUntil = (dateStr) => {
-  const d = Math.ceil((parseDate(dateStr) - new Date('2026-07-11')) / 86400000)
-  return d
+  const groups = Array.from(map.entries()).map(([vaccineID, batches]) => {
+    // First Expired, First Out — earliest expiration date first.
+    const sorted = [...batches].sort((a, b) => new Date(a.expirationDate) - new Date(b.expirationDate))
+    const activeBatches = sorted.filter(isActive)
+    const vaccineRecord = vaccines.value.find(v => v.vaccineID === vaccineID)
+    return {
+      vaccineID,
+      vaccineName: vaccineName(vaccineID),
+      vaccineIsActive: isVaccineActive(vaccineRecord),
+      batches: sorted,
+      batchCount: sorted.length,
+      totalDoses: activeBatches.reduce((sum, b) => sum + (b.currentQuantity || 0), 0),
+      hasCritical: sorted.some(b => isActive(b) && computeStatus(b) === 'Low Stock'),
+      hasExpiring: sorted.some(b => isActive(b) && daysUntil(b.expirationDate) >= 0 && daysUntil(b.expirationDate) <= 30 && computeStatus(b) !== 'Expired'),
+      hasExpired: sorted.some(b => computeStatus(b) === 'Expired'),
+    }
+  })
+
+  groups.sort((a, b) => a.vaccineName.localeCompare(b.vaccineName))
+  return groups
+})
+
+/* ------------------------------ Pagination (over vaccine groups) ---------------------------- */
+const pageSize = ref(25)
+const currentPage = ref(1)
+const totalGroups = computed(() => groupedInventory.value.length)
+const totalBatchesFiltered = computed(() => filteredInventory.value.length)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalGroups.value / pageSize.value)))
+const paginatedGroups = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return groupedInventory.value.slice(start, start + pageSize.value)
+})
+function goToPage(p) {
+  currentPage.value = Math.min(Math.max(1, p), totalPages.value)
+}
+watch([searchQuery, vaccineFilter, statusFilter, expirationFilter, activeFilter, pageSize], () => {
+  currentPage.value = 1
+})
+
+/* ------------------------------ Expand / collapse groups ---------------------------- */
+const expandedGroups = ref(new Set())
+function toggleGroup(vaccineID) {
+  const next = new Set(expandedGroups.value)
+  next.has(vaccineID) ? next.delete(vaccineID) : next.add(vaccineID)
+  expandedGroups.value = next
+}
+function expandAll() {
+  expandedGroups.value = new Set(groupedInventory.value.map(g => g.vaccineID))
+}
+function collapseAll() {
+  expandedGroups.value = new Set()
 }
 
-const criticalStock = computed(() => batches.value.filter((b) => b.status === 'Critical'))
-const expiringSoonList = computed(() =>
-  batches.value.filter((b) => {
-    const d = daysUntil(b.expirationDate)
-    return d >= 0 && d <= 30 && b.status !== 'Expired'
-  })
+/* -------------------------------- Dashboard summary (compact strip) ---------------------------------- */
+const summary = computed(() => {
+  const list = Array.isArray(inventory.value) ? inventory.value : []
+  const active = list.filter(isActive)
+  const withStatus = active.map(i => ({ i, status: computeStatus(i) }))
+  return {
+    totalVaccineTypes: new Set(active.map(i => i.vaccineID)).size,
+    totalBatches: active.length,
+    totalDoses: active.reduce((sum, i) => sum + (i.currentQuantity || 0), 0),
+    lowStock: withStatus.filter(x => x.status === 'Low Stock').length,
+    expiringSoon: withStatus.filter(x => {
+      const d = daysUntil(x.i.expirationDate)
+      return d >= 0 && d <= 30 && x.status !== 'Expired'
+    }).length,
+    expired: withStatus.filter(x => x.status === 'Expired').length,
+  }
+})
+
+/* ------------------------------ Alerts panel (active batches only, sorted by urgency) ---------------------------- */
+const criticalStock = computed(() =>
+  inventory.value.filter(i => isActive(i) && computeStatus(i) === 'Low Stock')
+    .sort((a, b) => (a.currentQuantity - a.minimumStock) - (b.currentQuantity - b.minimumStock))
 )
-const expiredList = computed(() => batches.value.filter((b) => b.status === 'Expired'))
+const expiringSoonList = computed(() =>
+  inventory.value.filter(i => isActive(i) && (() => {
+      const d = daysUntil(i.expirationDate)
+      return d >= 0 && d <= 30 && computeStatus(i) !== 'Expired'
+    })())
+    .sort((a, b) => daysUntil(a.expirationDate) - daysUntil(b.expirationDate))
+)
+const expiredList = computed(() =>
+  inventory.value.filter(i => isActive(i) && computeStatus(i) === 'Expired')
+    .sort((a, b) => daysUntil(b.expirationDate) - daysUntil(a.expirationDate))
+)
 
 /* ------------------------------ Row actions menu ---------------------------- */
 const openMenuId = ref(null)
 const toggleMenu = (id) => (openMenuId.value = openMenuId.value === id ? null : id)
 const closeMenu = () => (openMenuId.value = null)
 
-const markExpired = (batch) => {
-  batch.status = 'Expired'
-  batch.history.unshift({ date: 'Today', action: 'Expired', quantity: `-${batch.qtyRemaining}`, performedBy: 'Renzo Miguel', remarks: 'Marked expired manually' })
-  batch.qtyRemaining = 0
-  closeMenu()
-}
-
-/* -------------------------------- Details drawer ---------------------------- */
+/* --------------------------------- Batch details drawer --------------------------------- */
 const showDrawer = ref(false)
 const selectedBatch = ref(null)
-const openDrawer = (batch) => {
-  selectedBatch.value = batch
+function openDrawer(item) {
+  selectedBatch.value = item
   showDrawer.value = true
   closeMenu()
 }
-const closeDrawer = () => (showDrawer.value = false)
+function closeDrawer() {
+  showDrawer.value = false
+}
 
-/* --------------------------------- Receive stock modal --------------------------------- */
+/* --------------------------------- Receive New Batch modal --------------------------------- */
 const showReceiveModal = ref(false)
+const formError = ref(null)
 const receiveForm = reactive({
-  vaccine: vaccineOptions[0], batchNumber: '', lotNumber: '', manufacturer: '',
-  quantity: '', expirationDate: '', dateReceived: '', storageLocation: '', remarks: '',
+  vaccineID: '', lotNumber: '', initialQuantity: '', minimumStock: '',
+  expirationDate: '', receivedDate: '', supplier: '',
 })
-const openReceiveModal = () => {
+function openReceiveModal() {
   Object.assign(receiveForm, {
-    vaccine: vaccineOptions[0], batchNumber: '', lotNumber: '', manufacturer: '',
-    quantity: '', expirationDate: '', dateReceived: '', storageLocation: '', remarks: '',
+    vaccineID: '', lotNumber: '', initialQuantity: '', minimumStock: '',
+    expirationDate: '', receivedDate: '', supplier: '',
   })
+  formError.value = null
   showReceiveModal.value = true
-}
-const receiveStock = () => {
-  const qty = Number(receiveForm.quantity) || 0
-  batches.value.unshift({
-    id: Date.now(),
-    batchNumber: receiveForm.batchNumber || `BT-2026-${Math.floor(100 + Math.random() * 899)}`,
-    vaccine: receiveForm.vaccine,
-    manufacturer: receiveForm.manufacturer || '—',
-    lotNumber: receiveForm.lotNumber || '—',
-    qtyReceived: qty,
-    qtyRemaining: qty,
-    expirationDate: receiveForm.expirationDate || '—',
-    dateReceived: receiveForm.dateReceived || 'Today',
-    storageLocation: receiveForm.storageLocation || '—',
-    status: 'Healthy',
-    history: [{ date: 'Today', action: 'Received', quantity: `+${qty}`, performedBy: 'Renzo Miguel', remarks: receiveForm.remarks || 'New stock delivery' }],
-  })
-  showReceiveModal.value = false
-}
-
-/* --------------------------------- Adjust stock modal --------------------------------- */
-const showAdjustModal = ref(false)
-const adjustForm = reactive({ id: null, type: 'Increase', quantity: '', reason: '' })
-const openAdjustModal = (batch) => {
-  Object.assign(adjustForm, { id: batch.id, type: 'Increase', quantity: '', reason: '' })
-  showAdjustModal.value = true
   closeMenu()
 }
-const saveAdjustment = () => {
-  const b = batches.value.find((x) => x.id === adjustForm.id)
-  const qty = Number(adjustForm.quantity) || 0
-  if (b && qty > 0) {
-    if (adjustForm.type === 'Increase') {
-      b.qtyRemaining += qty
-      b.history.unshift({ date: 'Today', action: 'Adjusted', quantity: `+${qty}`, performedBy: 'Renzo Miguel', remarks: adjustForm.reason || 'Manual adjustment' })
-    } else {
-      b.qtyRemaining = Math.max(0, b.qtyRemaining - qty)
-      b.history.unshift({ date: 'Today', action: 'Adjusted', quantity: `-${qty}`, performedBy: 'Renzo Miguel', remarks: adjustForm.reason || 'Manual adjustment' })
-    }
+async function submitReceiveStock() {
+  if (!receiveForm.vaccineID || !receiveForm.lotNumber || !receiveForm.initialQuantity
+      || !receiveForm.minimumStock || !receiveForm.expirationDate || !receiveForm.receivedDate) {
+    formError.value = 'Please fill all required fields.'
+    return
   }
-  showAdjustModal.value = false
+  // Belt-and-suspenders: re-check the chosen vaccine is still active right before
+  // submit, in case the underlying data changed while the modal was open.
+  const chosen = vaccines.value.find(v => v.vaccineID === receiveForm.vaccineID)
+  if (!isVaccineActive(chosen)) {
+    formError.value = 'This vaccine is inactive and cannot receive new batches.'
+    return
+  }
+
+  isSaving.value = true
+  try {
+    const qty = Number(receiveForm.initialQuantity)
+    await api.createInventory({
+      vaccineID: receiveForm.vaccineID,
+      lotNumber: receiveForm.lotNumber,
+      initialQuantity: qty,
+      currentQuantity: qty, // a fresh batch always starts full
+      minimumStock: Number(receiveForm.minimumStock),
+      expirationDate: receiveForm.expirationDate,
+      receivedDate: receiveForm.receivedDate,
+      supplier: receiveForm.supplier || '',
+      status: true, // new batches are active by default
+    })
+    await loadAll()
+    expandedGroups.value = new Set([...expandedGroups.value, receiveForm.vaccineID])
+    showReceiveModal.value = false
+    formError.value = null
+  } catch (e) {
+    formError.value = `Failed to receive batch: ${e.response?.data?.message || e.message}`
+  } finally {
+    isSaving.value = false
+  }
+}
+
+/* --------------------------------- Edit modal (restricted field set) --------------------------------- */
+const showEditModal = ref(false)
+const editForm = reactive({
+  id: null, lotNumber: '', minimumStock: '', expirationDate: '', supplier: '', isActive: true, raw: null,
+})
+function openEditModal(item) {
+  Object.assign(editForm, {
+    id: item.inventoryID,
+    lotNumber: item.lotNumber,
+    minimumStock: item.minimumStock,
+    expirationDate: toDateInputValue(item.expirationDate),
+    supplier: item.supplier || '',
+    isActive: isActive(item),
+    raw: item,
+  })
+  formError.value = null
+  showEditModal.value = true
+  closeMenu()
+}
+async function submitEdit() {
+  if (!editForm.lotNumber || editForm.minimumStock === '' || !editForm.expirationDate) {
+    formError.value = 'Please fill all required fields.'
+    return
+  }
+  isSaving.value = true
+  try {
+    const raw = editForm.raw || {}
+    // VaccineID / InitialQuantity / CurrentQuantity / ReceivedDate stay untouched here —
+    // dose counts should only change through vaccination-administration actions.
+    await api.updateInventory(editForm.id, {
+      vaccineID: raw.vaccineID,
+      lotNumber: editForm.lotNumber,
+      initialQuantity: raw.initialQuantity,
+      currentQuantity: raw.currentQuantity,
+      minimumStock: Number(editForm.minimumStock),
+      expirationDate: editForm.expirationDate,
+      receivedDate: raw.receivedDate,
+      supplier: editForm.supplier || '',
+      status: editForm.isActive,
+    })
+    await loadAll()
+    showEditModal.value = false
+    formError.value = null
+  } catch (e) {
+    formError.value = `Failed to update batch: ${e.response?.data?.message || e.message}`
+  } finally {
+    isSaving.value = false
+  }
+}
+
+/* --------------------------------- Activate / Deactivate batch (replaces Delete) --------------------------------- */
+// Inventory batches are never deleted — they stay for reports, history, and audit logs.
+const showDeactivateModal = ref(false)
+const deactivateTarget = ref(null)
+function confirmDeactivate(item) {
+  deactivateTarget.value = item
+  showDeactivateModal.value = true
+  closeMenu()
+}
+async function submitDeactivate() {
+  if (!deactivateTarget.value) return
+  await setActiveState(deactivateTarget.value, false)
+  showDeactivateModal.value = false
+  deactivateTarget.value = null
+}
+async function activateBatch(item) {
+  await setActiveState(item, true)
+  closeMenu()
+}
+async function setActiveState(item, nextActive) {
+  isSaving.value = true
+  try {
+    await api.updateInventory(item.inventoryID, {
+      vaccineID: item.vaccineID,
+      lotNumber: item.lotNumber,
+      initialQuantity: item.initialQuantity,
+      currentQuantity: item.currentQuantity,
+      minimumStock: item.minimumStock,
+      expirationDate: item.expirationDate,
+      receivedDate: item.receivedDate,
+      supplier: item.supplier || '',
+      status: nextActive,
+    })
+    await loadAll()
+    error.value = null
+  } catch (e) {
+    error.value = `Failed to update batch status: ${e.response?.data?.message || e.message}`
+  } finally {
+    isSaving.value = false
+  }
 }
 </script>
 
 <template>
   <div class="min-h-screen bg-slate-50 flex text-slate-900" @click="closeMenu">
-    <!-- ============================ SIDEBAR ============================ -->
-    <aside
-      :class="[isCollapsed ? 'w-20' : 'w-65']"
-      class="hidden md:flex flex-col shrink-0 sticky top-0 h-screen bg-white border-r border-slate-200 transition-all duration-300 ease-in-out"
-    >
-      <div class="h-17.5 flex items-center gap-3 px-5 border-b border-slate-200 shrink-0">
-        <div class="w-9 h-9 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
-          <span class="text-white font-bold text-sm">A</span>
-        </div>
-        <span v-if="!isCollapsed" class="font-bold text-slate-900 tracking-tight whitespace-nowrap overflow-hidden">Aruga</span>
-      </div>
-
-      <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-        <button
-          v-for="item in navItems"
-          :key="item.label"
-          @click="activeNav = item.label"
-          :class="[
-            activeNav === item.label ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900',
-          ]"
-          class="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-        >
-          <span class="text-base shrink-0" aria-hidden="true">{{ item.icon }}</span>
-          <span v-if="!isCollapsed" class="truncate">{{ item.label }}</span>
-        </button>
-      </nav>
-
-      <div class="border-t border-slate-200 p-3 shrink-0 space-y-2">
-        <div class="flex items-center gap-3 px-2 py-2">
-          <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">RM</div>
-          <div v-if="!isCollapsed" class="min-w-0">
-            <p class="text-sm font-semibold text-slate-900 truncate">Renzo Miguel</p>
-            <p class="text-xs text-slate-500 truncate">System Admin</p>
-          </div>
-        </div>
-        <button class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400">
-          <span class="text-base shrink-0" aria-hidden="true">🚪</span>
-          <span v-if="!isCollapsed">Log out</span>
-        </button>
-        <button @click="toggleSidebar" class="w-full flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors">
-          <span :class="isCollapsed ? 'rotate-180' : ''" class="transition-transform inline-block">◀</span>
-        </button>
-      </div>
-    </aside>
+    <!-- ============================ SIDEBAR (shared component) ============================ -->
+    <AppSidebar v-model:active-nav="activeNav" @logout="handleLogout" />
 
     <!-- ============================ MAIN ============================ -->
     <div class="flex-1 min-w-0 flex flex-col">
-      <!-- Top navbar -->
-      <header class="h-[70px] sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-6 gap-4">
-        <div class="min-w-0">
-          <h1 class="text-lg font-bold text-slate-900 truncate">Inventory Management</h1>
-          <p class="text-xs text-slate-500 truncate">Dashboard / Inventory</p>
-        </div>
-        <div class="flex items-center gap-3 shrink-0">
-          <button class="relative w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-            <span aria-hidden="true">🔔</span>
-            <span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white"></span>
-          </button>
-          <button class="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-            <span aria-hidden="true">⚙️</span>
-          </button>
-          <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">RM</div>
-        </div>
-      </header>
+      <AppHeader title="Inventory Management" breadcrumb="Dashboard / Inventory" />
 
-      <!-- Content -->
-      <main class="p-6 space-y-6">
-        <!-- Summary cards -->
-        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          <div class="min-w-0 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            <div class="flex items-start justify-between gap-2">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Batches</p>
-              <div class="bg-teal-50 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm">📦</div>
+      <main class="p-6 space-y-5">
+        <div v-if="error" class="rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700 flex items-center justify-between">
+          <span>{{ error }}</span>
+          <button @click="loadAll" class="font-semibold underline shrink-0 ml-3">Retry</button>
+        </div>
+
+        <!-- ============ Compact overview strip ============ -->
+        <section class="bg-white border border-slate-200 rounded-xl shadow-sm px-5 py-3.5">
+          <div class="flex flex-wrap items-center gap-x-8 gap-y-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-medium text-slate-500">Vaccine Types</span>
+              <span class="text-base font-bold text-slate-900">{{ summary.totalVaccineTypes }}</span>
             </div>
-            <p class="mt-2 text-2xl font-extrabold text-slate-900">{{ summary.totalBatches }}</p>
-          </div>
-          <div class="min-w-0 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            <div class="flex items-start justify-between gap-2">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Available Doses</p>
-              <div class="bg-emerald-50 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm">💉</div>
+            <div class="w-px h-5 bg-slate-200 hidden sm:block" />
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-medium text-slate-500">Active Batches</span>
+              <span class="text-base font-bold text-slate-900">{{ summary.totalBatches }}</span>
             </div>
-            <p class="mt-2 text-2xl font-extrabold text-slate-900">{{ summary.totalDoses }}</p>
-          </div>
-          <div class="min-w-0 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            <div class="flex items-start justify-between gap-2">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Low Stock Batches</p>
-              <div class="bg-amber-50 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm">⚠️</div>
+            <div class="w-px h-5 bg-slate-200 hidden sm:block" />
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-medium text-slate-500">Available Doses</span>
+              <span class="text-base font-bold text-slate-900">{{ summary.totalDoses }}</span>
             </div>
-            <p class="mt-2 text-2xl font-extrabold text-slate-900">{{ summary.lowStock }}</p>
-          </div>
-          <div class="min-w-0 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            <div class="flex items-start justify-between gap-2">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Expiring in 30 Days</p>
-              <div class="bg-orange-50 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm">⏳</div>
+            <div class="w-px h-5 bg-slate-200 hidden sm:block" />
+            <div class="flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+              <span class="text-xs font-medium text-slate-500">Low Stock</span>
+              <span class="text-base font-bold text-amber-700">{{ summary.lowStock }}</span>
             </div>
-            <p class="mt-2 text-2xl font-extrabold text-slate-900">{{ summary.expiringSoon }}</p>
-          </div>
-          <div class="min-w-0 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            <div class="flex items-start justify-between gap-2">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Expired Batches</p>
-              <div class="bg-red-100 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm">🚫</div>
+            <div class="flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+              <span class="text-xs font-medium text-slate-500">Expiring ≤30d</span>
+              <span class="text-base font-bold text-orange-700">{{ summary.expiringSoon }}</span>
             </div>
-            <p class="mt-2 text-2xl font-extrabold text-slate-900">{{ summary.expired }}</p>
-          </div>
-          <div class="min-w-0 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-            <div class="flex items-start justify-between gap-2">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Received This Month</p>
-              <div class="bg-sky-50 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm">📥</div>
+            <div class="flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-red-600"></span>
+              <span class="text-xs font-medium text-slate-500">Expired</span>
+              <span class="text-base font-bold text-red-700">{{ summary.expired }}</span>
             </div>
-            <p class="mt-2 text-2xl font-extrabold text-slate-900">{{ summary.receivedThisMonth }}</p>
           </div>
         </section>
 
-        <!-- Toolbar -->
+        <!-- ============ Toolbar ============ -->
         <section class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
           <div class="flex flex-col lg:flex-row lg:items-center gap-3">
             <div class="relative flex-1 min-w-0">
@@ -363,119 +492,197 @@ const saveAdjustment = () => {
               <input
                 v-model="searchQuery"
                 type="text"
-                placeholder="Search by vaccine name or batch number..."
+                placeholder="Search vaccine, lot number, or supplier..."
                 class="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 bg-slate-50 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors"
               />
             </div>
 
-            <select
-              v-model="vaccineFilter"
-              class="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors"
-            >
-              <option>All Vaccines</option>
-              <option v-for="v in vaccineOptions" :key="v">{{ v }}</option>
+            <select v-model="vaccineFilter" class="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
+              <option value="All">All Vaccines</option>
+              <option v-for="v in vaccines" :key="v.vaccineID" :value="v.vaccineID">
+                {{ v.vaccineName }}{{ !isVaccineActive(v) ? ' (inactive)' : '' }}
+              </option>
             </select>
 
-            <select
-              v-model="statusFilter"
-              class="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors"
-            >
+            <select v-model="statusFilter" class="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
               <option value="All">All Status</option>
               <option>Healthy</option>
               <option>Low Stock</option>
-              <option>Critical</option>
               <option>Expired</option>
             </select>
 
-            <select
-              v-model="sortBy"
-              class="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors"
-            >
-              <option>Expiration Date</option>
-              <option>Date Received</option>
-              <option>Quantity Remaining</option>
+            <select v-model="expirationFilter" class="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
+              <option value="All">All Expirations</option>
+              <option value="Expiring Soon">Expiring within 30 Days</option>
+              <option value="Expired">Expired</option>
+              <option value="Valid">Valid (30+ Days)</option>
+            </select>
+
+            <select v-model="activeFilter" class="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
+              <option value="All">Active + Inactive</option>
+              <option value="Active">Active only</option>
+              <option value="Inactive">Inactive only</option>
             </select>
 
             <div class="flex items-center gap-2 shrink-0">
-              <button class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-                Export Inventory
-              </button>
               <button
                 @click="openReceiveModal"
                 class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
               >
-                + Receive Stock
+                + Receive New Batch
               </button>
             </div>
           </div>
         </section>
 
-        <!-- Table + Alerts panel -->
+        <!-- ============ Table + Alerts ============ -->
         <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-          <!-- Inventory table -->
+          <!-- Grouped inventory -->
           <div class="lg:col-span-2 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm">
-                <thead>
-                  <tr class="border-b border-slate-200 bg-slate-50/60">
-                    <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-5 py-3">Batch Number</th>
-                    <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Vaccine</th>
-                    <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Received</th>
-                    <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Remaining</th>
-                    <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Expiration</th>
-                    <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Date Received</th>
-                    <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Location</th>
-                    <th class="text-left font-semibold text-slate-500 text-xs uppercase tracking-wide px-3 py-3">Status</th>
-                    <th class="text-right font-semibold text-slate-500 text-xs uppercase tracking-wide px-5 py-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="batch in filteredBatches"
-                    :key="batch.id"
-                    class="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors"
-                  >
-                    <td class="px-5 py-3 font-mono text-xs text-slate-500 whitespace-nowrap">{{ batch.batchNumber }}</td>
-                    <td class="px-3 py-3 font-semibold text-slate-900 whitespace-nowrap">{{ batch.vaccine }}</td>
-                    <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ batch.qtyReceived }}</td>
-                    <td class="px-3 py-3 text-slate-900 font-semibold whitespace-nowrap">{{ batch.qtyRemaining }}</td>
-                    <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ batch.expirationDate }}</td>
-                    <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ batch.dateReceived }}</td>
-                    <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ batch.storageLocation }}</td>
-                    <td class="px-3 py-3">
-                      <span :class="[statusMeta[batch.status].tint, statusMeta[batch.status].text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
-                        <span :class="statusMeta[batch.status].dot" class="w-1.5 h-1.5 rounded-full"></span>
-                        {{ batch.status }}
-                      </span>
-                    </td>
-                    <td class="px-5 py-3 text-right relative">
-                      <button
-                        @click.stop="toggleMenu(batch.id)"
-                        class="text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg w-8 h-8 inline-flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                      >
-                        ⋮
-                      </button>
+            <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-slate-50/60">
+              <p class="text-xs font-semibold text-slate-500">
+                {{ totalGroups }} vaccine{{ totalGroups === 1 ? '' : 's' }} · {{ totalBatchesFiltered }} batch{{ totalBatchesFiltered === 1 ? '' : 'es' }}
+              </p>
+              <div class="flex items-center gap-3">
+                <button @click="expandAll" class="text-xs font-semibold text-emerald-700 hover:text-emerald-800">Expand all</button>
+                <span class="text-slate-300">|</span>
+                <button @click="collapseAll" class="text-xs font-semibold text-slate-500 hover:text-slate-700">Collapse all</button>
+              </div>
+            </div>
 
-                      <div
-                        v-if="openMenuId === batch.id"
-                        @click.stop
-                        class="absolute right-5 top-11 z-30 w-48 bg-white border border-slate-200 rounded-lg shadow-md py-1 text-left"
-                      >
-                        <button @click="openDrawer(batch)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">View Batch Details</button>
-                        <button @click="closeMenu" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">Edit Batch</button>
-                        <button @click="openAdjustModal(batch)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">Adjust Quantity</button>
-                        <div class="my-1 border-t border-slate-100"></div>
-                        <button v-if="batch.status !== 'Expired'" @click="markExpired(batch)" class="w-full text-left px-3.5 py-2 text-sm text-red-700 hover:bg-red-50 transition-colors">Mark as Expired</button>
-                        <button @click="closeMenu" class="w-full text-left px-3.5 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors">Archive Batch</button>
-                      </div>
-                    </td>
-                  </tr>
+            <div v-if="isLoading && inventory.length === 0" class="px-5 py-12 text-center text-sm text-slate-400">Loading inventory…</div>
 
-                  <tr v-if="filteredBatches.length === 0">
-                    <td colspan="9" class="px-5 py-12 text-center text-sm text-slate-400">No batches match your search or filters.</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div v-else-if="paginatedGroups.length === 0" class="px-5 py-12 text-center text-sm text-slate-400">
+              {{ inventory.length === 0 ? 'No inventory batches yet. Click "Receive New Batch" to add one.' : 'No batches match your search or filters.' }}
+            </div>
+
+            <div v-else class="divide-y divide-slate-100">
+              <div v-for="group in paginatedGroups" :key="group.vaccineID">
+                <!-- Group header: e.g. "BCG Vaccine" containing its lots -->
+                <button
+                  @click="toggleGroup(group.vaccineID)"
+                  class="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition-colors text-left"
+                >
+                  <span
+                    class="text-slate-400 transition-transform text-xs shrink-0"
+                    :class="expandedGroups.has(group.vaccineID) ? 'rotate-90' : ''"
+                  >▶</span>
+                  <span class="font-semibold text-slate-900 text-sm">{{ group.vaccineName }}</span>
+                  <span v-if="!group.vaccineIsActive" class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 whitespace-nowrap">Vaccine inactive</span>
+                  <span class="text-xs text-slate-400">
+                    {{ group.batchCount }} batch{{ group.batchCount === 1 ? '' : 'es' }} · {{ group.totalDoses }} doses
+                  </span>
+                  <span class="flex-1"></span>
+                  <span v-if="group.hasExpired" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-800">Expired</span>
+                  <span v-else-if="group.hasCritical" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Low stock</span>
+                  <span v-else-if="group.hasExpiring" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-700">Expiring soon</span>
+                </button>
+
+                <!-- Batch rows (lots) under this vaccine group -->
+                <div v-if="expandedGroups.has(group.vaccineID)" class="bg-slate-50/40">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="text-left text-xs uppercase tracking-wide text-slate-400">
+                        <th class="font-medium pl-12 pr-3 py-2">Lot Number</th>
+                        <th class="font-medium px-3 py-2">Current / Min</th>
+                        <th class="font-medium px-3 py-2">Expiration</th>
+                        <th class="font-medium px-3 py-2">Supplier</th>
+                        <th class="font-medium px-3 py-2">Status</th>
+                        <th class="font-medium px-3 py-2">Lifecycle</th>
+                        <th class="font-medium pr-5 py-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="(item, idx) in group.batches"
+                        :key="item.inventoryID"
+                        class="border-t border-slate-100 hover:bg-white transition-colors"
+                        :class="!isActive(item) ? 'opacity-60' : ''"
+                      >
+                        <td class="pl-12 pr-3 py-2.5">
+                          <button @click.stop="openDrawer(item)" class="flex items-center gap-2 hover:underline decoration-slate-300 underline-offset-2">
+                            <span class="font-mono text-xs text-slate-600 whitespace-nowrap">{{ item.lotNumber }}</span>
+                            <span v-if="idx === 0 && isActive(item)" class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 whitespace-nowrap">Use next</span>
+                          </button>
+                        </td>
+                        <td class="px-3 py-2.5 whitespace-nowrap">
+                          <span class="font-semibold text-slate-900">{{ item.currentQuantity }}</span>
+                          <span class="text-slate-400"> / {{ item.minimumStock }}</span>
+                        </td>
+                        <td class="px-3 py-2.5 whitespace-nowrap text-slate-600">{{ formatDate(item.expirationDate) }}</td>
+                        <td class="px-3 py-2.5 whitespace-nowrap text-slate-500">{{ item.supplier || '—' }}</td>
+                        <td class="px-3 py-2.5">
+                          <span :class="[statusMeta[computeStatus(item)].tint, statusMeta[computeStatus(item)].text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
+                            <span :class="statusMeta[computeStatus(item)].dot" class="w-1.5 h-1.5 rounded-full"></span>
+                            {{ computeStatus(item) }}
+                          </span>
+                        </td>
+                        <td class="px-3 py-2.5">
+                          <span
+                            class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap"
+                            :class="isActive(item) ? 'bg-slate-100 text-slate-600' : 'bg-slate-200 text-slate-500'"
+                          >
+                            {{ isActive(item) ? 'Active' : 'Inactive' }}
+                          </span>
+                          <span v-if="shouldRecommendDeactivation(item)" class="block text-[11px] text-amber-700 mt-1">Recommend deactivating</span>
+                        </td>
+                        <td class="pr-5 py-2.5 text-right relative">
+                          <button
+                            @click.stop="toggleMenu(item.inventoryID)"
+                            class="text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg w-8 h-8 inline-flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                          >⋮</button>
+
+                          <div
+                            v-if="openMenuId === item.inventoryID"
+                            @click.stop
+                            class="absolute right-5 top-10 z-30 w-44 bg-white border border-slate-200 rounded-lg shadow-md py-1 text-left"
+                          >
+                            <button @click="openDrawer(item)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">View Details</button>
+                            <button @click="openEditModal(item)" class="w-full text-left px-3.5 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors">Edit Batch</button>
+                            <button
+                              v-if="isActive(item)"
+                              @click="confirmDeactivate(item)"
+                              class="w-full text-left px-3.5 py-2 text-sm text-amber-700 hover:bg-amber-50 transition-colors"
+                            >Deactivate</button>
+                            <button
+                              v-else
+                              @click="activateBatch(item)"
+                              class="w-full text-left px-3.5 py-2 text-sm text-emerald-700 hover:bg-emerald-50 transition-colors"
+                            >Activate</button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-slate-200">
+              <div class="flex items-center gap-2 text-xs text-slate-500">
+                <span>Show</span>
+                <select v-model.number="pageSize" class="text-xs rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                  <option :value="10">10</option>
+                  <option :value="25">25</option>
+                  <option :value="50">50</option>
+                  <option :value="100">100</option>
+                </select>
+                <span>per page · {{ totalGroups }} vaccine{{ totalGroups === 1 ? '' : 's' }} total</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  @click="goToPage(currentPage - 1)"
+                  :disabled="currentPage <= 1"
+                  class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >Previous</button>
+                <span class="text-xs text-slate-500 px-1">Page {{ currentPage }} of {{ totalPages }}</span>
+                <button
+                  @click="goToPage(currentPage + 1)"
+                  :disabled="currentPage >= totalPages"
+                  class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >Next</button>
+              </div>
             </div>
           </div>
 
@@ -486,11 +693,11 @@ const saveAdjustment = () => {
             <div>
               <p class="text-xs font-bold uppercase tracking-wide text-red-600 mb-2">Critical Stock</p>
               <div v-if="criticalStock.length === 0" class="text-xs text-slate-400">No critical batches.</div>
-              <div v-for="b in criticalStock" :key="'c-' + b.id" class="rounded-lg bg-red-50 px-3 py-2.5 mb-2 last:mb-0">
-                <p class="text-sm font-semibold text-slate-900">{{ b.vaccine }}</p>
+              <div v-for="i in criticalStock" :key="'c-' + i.inventoryID" class="rounded-lg bg-red-50 px-3 py-2.5 mb-2 last:mb-0">
+                <p class="text-sm font-semibold text-slate-900">{{ vaccineName(i.vaccineID) }}</p>
                 <div class="flex items-center justify-between mt-0.5">
-                  <span class="text-xs text-slate-500 font-mono">{{ b.batchNumber }}</span>
-                  <span class="text-xs font-semibold text-red-700">{{ b.qtyRemaining }} left</span>
+                  <span class="text-xs text-slate-500 font-mono">{{ i.lotNumber }}</span>
+                  <span class="text-xs font-semibold text-red-700">{{ i.currentQuantity }} left</span>
                 </div>
               </div>
             </div>
@@ -498,23 +705,23 @@ const saveAdjustment = () => {
             <div>
               <p class="text-xs font-bold uppercase tracking-wide text-amber-600 mb-2">Expiring Soon</p>
               <div v-if="expiringSoonList.length === 0" class="text-xs text-slate-400">Nothing expiring within 30 days.</div>
-              <div v-for="b in expiringSoonList" :key="'e-' + b.id" class="rounded-lg bg-amber-50 px-3 py-2.5 mb-2 last:mb-0">
-                <p class="text-sm font-semibold text-slate-900">{{ b.vaccine }}</p>
+              <div v-for="i in expiringSoonList" :key="'e-' + i.inventoryID" class="rounded-lg bg-amber-50 px-3 py-2.5 mb-2 last:mb-0">
+                <p class="text-sm font-semibold text-slate-900">{{ vaccineName(i.vaccineID) }}</p>
                 <div class="flex items-center justify-between mt-0.5">
-                  <span class="text-xs text-slate-500 font-mono">{{ b.batchNumber }}</span>
-                  <span class="text-xs font-semibold text-amber-700">{{ daysUntil(b.expirationDate) }} days left</span>
+                  <span class="text-xs text-slate-500 font-mono">{{ i.lotNumber }}</span>
+                  <span class="text-xs font-semibold text-amber-700">{{ daysUntil(i.expirationDate) }} days left</span>
                 </div>
               </div>
             </div>
 
             <div>
-              <p class="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Expired Vaccines</p>
+              <p class="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Expired</p>
               <div v-if="expiredList.length === 0" class="text-xs text-slate-400">No expired batches.</div>
-              <div v-for="b in expiredList" :key="'x-' + b.id" class="rounded-lg bg-slate-100 px-3 py-2.5 mb-2 last:mb-0">
-                <p class="text-sm font-semibold text-slate-900">{{ b.vaccine }}</p>
+              <div v-for="i in expiredList" :key="'x-' + i.inventoryID" class="rounded-lg bg-slate-100 px-3 py-2.5 mb-2 last:mb-0">
+                <p class="text-sm font-semibold text-slate-900">{{ vaccineName(i.vaccineID) }}</p>
                 <div class="flex items-center justify-between mt-0.5">
-                  <span class="text-xs text-slate-500 font-mono">{{ b.batchNumber }}</span>
-                  <span class="text-xs font-semibold text-slate-600">{{ b.qtyRemaining }} left</span>
+                  <span class="text-xs text-slate-500 font-mono">{{ i.lotNumber }}</span>
+                  <span class="text-xs font-semibold text-slate-600">{{ i.currentQuantity }} left</span>
                 </div>
               </div>
             </div>
@@ -523,171 +730,175 @@ const saveAdjustment = () => {
       </main>
     </div>
 
-    <!-- ============================ BATCH DETAILS DRAWER ============================ -->
-    <transition name="fade">
-      <div v-if="showDrawer" class="fixed inset-0 bg-slate-900/30 z-40" @click="closeDrawer"></div>
-    </transition>
-    <transition name="slide">
-      <aside v-if="showDrawer" class="fixed top-0 right-0 h-screen w-full max-w-xl bg-white border-l border-slate-200 shadow-lg z-50 flex flex-col">
-        <div class="h-[70px] flex items-center justify-between px-6 border-b border-slate-200 shrink-0">
-          <h2 class="text-sm font-bold text-slate-900">Batch Details</h2>
-          <button @click="closeDrawer" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
-        </div>
-
-        <div v-if="selectedBatch" class="flex-1 overflow-y-auto p-6 space-y-6">
-          <div class="bg-slate-50 rounded-xl border border-slate-200 p-5">
-            <div class="flex items-start justify-between gap-3 mb-4">
-              <div>
-                <p class="text-base font-bold text-slate-900">{{ selectedBatch.vaccine }}</p>
-                <p class="text-xs text-slate-500 font-mono mt-0.5">{{ selectedBatch.batchNumber }}</p>
-              </div>
-              <span :class="[statusMeta[selectedBatch.status].tint, statusMeta[selectedBatch.status].text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full shrink-0">
-                <span :class="statusMeta[selectedBatch.status].dot" class="w-1.5 h-1.5 rounded-full"></span>
-                {{ selectedBatch.status }}
-              </span>
-            </div>
-            <div class="grid grid-cols-2 gap-x-4 gap-y-3">
-              <div><p class="text-xs text-slate-500">Manufacturer</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.manufacturer }}</p></div>
-              <div><p class="text-xs text-slate-500">Lot Number</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.lotNumber }}</p></div>
-              <div><p class="text-xs text-slate-500">Quantity Received</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.qtyReceived }}</p></div>
-              <div><p class="text-xs text-slate-500">Remaining Quantity</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.qtyRemaining }}</p></div>
-              <div><p class="text-xs text-slate-500">Expiration Date</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.expirationDate }}</p></div>
-              <div><p class="text-xs text-slate-500">Date Received</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.dateReceived }}</p></div>
-              <div class="col-span-2"><p class="text-xs text-slate-500">Storage Location</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.storageLocation }}</p></div>
-            </div>
-          </div>
-
-          <div>
-            <h3 class="text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">Inventory Movement History</h3>
-            <div class="space-y-3">
-              <div v-for="(m, idx) in selectedBatch.history" :key="idx" class="flex gap-3">
-                <div class="flex flex-col items-center pt-1">
-                  <span
-                    :class="m.quantity.startsWith('+') ? 'bg-emerald-500' : 'bg-rose-500'"
-                    class="w-2.5 h-2.5 rounded-full shrink-0"
-                  ></span>
-                  <span v-if="idx !== selectedBatch.history.length - 1" class="w-px flex-1 bg-slate-200 mt-1"></span>
-                </div>
-                <div class="flex-1 min-w-0 pb-3">
-                  <div class="flex items-center justify-between gap-2">
-                    <p class="text-sm font-semibold text-slate-900">{{ m.action }}</p>
-                    <span :class="m.quantity.startsWith('+') ? 'text-emerald-700' : 'text-rose-600'" class="text-sm font-bold shrink-0">{{ m.quantity }}</span>
-                  </div>
-                  <p class="text-xs text-slate-500 mt-0.5">{{ m.date }} · {{ m.performedBy }}</p>
-                  <p class="text-xs text-slate-400 mt-0.5">{{ m.remarks }}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="border-t border-slate-200 p-4 flex items-center gap-2 shrink-0">
-          <button @click="openAdjustModal(selectedBatch)" class="flex-1 text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Adjust Stock</button>
-          <button class="flex-1 text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Edit Batch</button>
-          <button @click="closeDrawer" class="text-sm font-semibold px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-50 transition-colors">Close</button>
-        </div>
-      </aside>
-    </transition>
-
-    <!-- ============================ RECEIVE STOCK MODAL ============================ -->
+    <!-- ============================ RECEIVE NEW BATCH MODAL ============================ -->
     <transition name="fade">
       <div v-if="showReceiveModal" class="fixed inset-0 bg-slate-900/40 z-40 flex items-center justify-center p-4" @click.self="showReceiveModal = false">
         <div class="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-            <h2 class="text-base font-bold text-slate-900">Receive Stock</h2>
+            <h2 class="text-base font-bold text-slate-900">Receive New Batch</h2>
             <button @click="showReceiveModal = false" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
           </div>
+          <p class="px-6 pt-4 text-xs text-slate-500">Receiving stock always creates a new batch — it never overwrites an existing lot.</p>
 
           <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div class="sm:col-span-2">
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Select Vaccine</label>
-              <select v-model="receiveForm.vaccine" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
-                <option v-for="v in vaccineOptions" :key="v">{{ v }}</option>
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Vaccine</label>
+              <!-- Only ACTIVE vaccines are selectable here. Inactive vaccines are
+                   filtered out before they ever reach this dropdown. -->
+              <select v-model="receiveForm.vaccineID" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors">
+                <option value="" disabled>Select a vaccine…</option>
+                <option v-for="v in activeVaccines" :key="v.vaccineID" :value="v.vaccineID">{{ v.vaccineName }}</option>
               </select>
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Batch Number</label>
-              <input v-model="receiveForm.batchNumber" type="text" placeholder="e.g. BT-2026-081" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <p v-if="activeVaccines.length === 0" class="text-xs text-rose-600 mt-1.5">
+                No active vaccines available. Activate a vaccine under Vaccine Management before receiving new stock.
+              </p>
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Lot Number</label>
               <input v-model="receiveForm.lotNumber" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Manufacturer (optional)</label>
-              <input v-model="receiveForm.manufacturer" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Initial Quantity</label>
+              <input v-model="receiveForm.initialQuantity" type="number" min="1" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Quantity Received</label>
-              <input v-model="receiveForm.quantity" type="number" min="1" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Minimum Stock</label>
+              <input v-model="receiveForm.minimumStock" type="number" min="0" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-500 mb-1.5">Expiration Date</label>
               <input v-model="receiveForm.expirationDate" type="date" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Date Received</label>
-              <input v-model="receiveForm.dateReceived" type="date" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Received Date</label>
+              <input v-model="receiveForm.receivedDate" type="date" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Storage Location</label>
-              <input v-model="receiveForm.storageLocation" type="text" placeholder="e.g. Fridge A - Shelf 1" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Supplier</label>
+              <input v-model="receiveForm.supplier" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
-            <div class="sm:col-span-2">
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Remarks</label>
-              <textarea v-model="receiveForm.remarks" rows="2" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors resize-none"></textarea>
-            </div>
+            <div v-if="formError" class="sm:col-span-2 rounded-lg bg-rose-50 px-3 py-2.5 text-xs text-rose-700">{{ formError }}</div>
           </div>
 
           <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200">
             <button @click="showReceiveModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-            <button @click="receiveStock" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Receive Stock</button>
+            <button :disabled="isSaving || activeVaccines.length === 0" @click="submitReceiveStock" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50">
+              {{ isSaving ? 'Saving…' : 'Receive Batch' }}
+            </button>
           </div>
         </div>
       </div>
     </transition>
 
-    <!-- ============================ ADJUST STOCK MODAL ============================ -->
+    <!-- ============================ EDIT MODAL (restricted fields) ============================ -->
     <transition name="fade">
-      <div v-if="showAdjustModal" class="fixed inset-0 bg-slate-900/40 z-40 flex items-center justify-center p-4" @click.self="showAdjustModal = false">
-        <div class="bg-white rounded-xl shadow-lg w-full max-w-md">
+      <div v-if="showEditModal" class="fixed inset-0 bg-slate-900/40 z-40 flex items-center justify-center p-4" @click.self="showEditModal = false">
+        <div class="bg-white rounded-xl shadow-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-            <h2 class="text-base font-bold text-slate-900">Adjust Stock</h2>
-            <button @click="showAdjustModal = false" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
+            <h2 class="text-base font-bold text-slate-900">Edit Batch</h2>
+            <button @click="showEditModal = false" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
           </div>
 
-          <div class="p-6 space-y-4">
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Adjustment Type</label>
-              <div class="grid grid-cols-2 gap-2">
-                <button
-                  @click="adjustForm.type = 'Increase'"
-                  :class="adjustForm.type === 'Increase' ? 'bg-emerald-600 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'"
-                  class="text-sm font-semibold px-3 py-2 rounded-lg transition-colors"
-                >Increase</button>
-                <button
-                  @click="adjustForm.type = 'Decrease'"
-                  :class="adjustForm.type === 'Decrease' ? 'bg-rose-600 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'"
-                  class="text-sm font-semibold px-3 py-2 rounded-lg transition-colors"
-                >Decrease</button>
-              </div>
+          <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Lot Number</label>
+              <input v-model="editForm.lotNumber" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Adjustment Quantity</label>
-              <input v-model="adjustForm.quantity" type="number" min="1" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Minimum Stock</label>
+              <input v-model="editForm.minimumStock" type="number" min="0" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Reason</label>
-              <textarea v-model="adjustForm.reason" rows="3" placeholder="e.g. Damaged vials, recount correction..." class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors resize-none"></textarea>
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Expiration Date</label>
+              <input v-model="editForm.expirationDate" type="date" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Supplier</label>
+              <input v-model="editForm.supplier" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
+            </div>
+            <div class="sm:col-span-2 flex items-center gap-2 pt-1">
+              <input id="editIsActive" v-model="editForm.isActive" type="checkbox" class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
+              <label for="editIsActive" class="text-sm font-medium text-slate-700">Active (available for vaccination)</label>
+            </div>
+            <p class="sm:col-span-2 text-xs text-slate-400 -mt-2">Current quantity and initial quantity aren't editable here — they update automatically through vaccination administration.</p>
+            <div v-if="formError" class="sm:col-span-2 rounded-lg bg-rose-50 px-3 py-2.5 text-xs text-rose-700">{{ formError }}</div>
           </div>
 
           <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200">
-            <button @click="showAdjustModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-            <button @click="saveAdjustment" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Save Adjustment</button>
+            <button @click="showEditModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+            <button :disabled="isSaving" @click="submitEdit" class="text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50">
+              {{ isSaving ? 'Saving…' : 'Save Changes' }}
+            </button>
           </div>
         </div>
       </div>
+    </transition>
+
+    <!-- ============================ DEACTIVATE CONFIRM MODAL ============================ -->
+    <transition name="fade">
+      <div v-if="showDeactivateModal" class="fixed inset-0 bg-slate-900/40 z-40 flex items-center justify-center p-4" @click.self="showDeactivateModal = false">
+        <div class="bg-white rounded-xl shadow-lg w-full max-w-sm">
+          <div class="p-6 text-center">
+            <div class="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3 text-xl">⏸️</div>
+            <p class="text-sm font-bold text-slate-900 mb-1">Deactivate this batch?</p>
+            <p class="text-xs text-slate-500">
+              Lot <span class="font-mono">{{ deactivateTarget?.lotNumber }}</span> ({{ vaccineName(deactivateTarget?.vaccineID) }}) will no longer be available for vaccination, but stays in reports and audit history. You can reactivate it anytime.
+            </p>
+          </div>
+          <div class="flex items-center justify-center gap-2 px-6 pb-6">
+            <button @click="showDeactivateModal = false" class="text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+            <button :disabled="isSaving" @click="submitDeactivate" class="text-sm font-semibold px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50">
+              {{ isSaving ? 'Saving…' : 'Deactivate Batch' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- ============================ BATCH DETAILS DRAWER ============================ -->
+    <transition name="fade">
+      <div v-if="showDrawer" class="fixed inset-0 bg-slate-900/30 z-40" @click="closeDrawer"></div>
+    </transition>
+    <transition name="slide">
+      <aside v-if="showDrawer" class="fixed top-0 right-0 h-screen w-full max-w-lg bg-white border-l border-slate-200 shadow-lg z-50 flex flex-col">
+        <div class="h-[70px] flex items-center justify-between px-6 border-b border-slate-200 shrink-0">
+          <h2 class="text-sm font-bold text-slate-900">Batch Details</h2>
+          <button @click="closeDrawer" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">✕</button>
+        </div>
+
+        <div v-if="selectedBatch" class="flex-1 overflow-y-auto p-6 space-y-4">
+          <div class="bg-slate-50 rounded-xl border border-slate-200 p-5">
+            <div class="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <p class="text-base font-bold text-slate-900">{{ vaccineName(selectedBatch.vaccineID) }}</p>
+                <p class="text-xs text-slate-500 font-mono mt-0.5">{{ selectedBatch.lotNumber }}</p>
+              </div>
+              <span :class="[statusMeta[computeStatus(selectedBatch)].tint, statusMeta[computeStatus(selectedBatch)].text]" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full shrink-0">
+                <span :class="statusMeta[computeStatus(selectedBatch)].dot" class="w-1.5 h-1.5 rounded-full"></span>
+                {{ computeStatus(selectedBatch) }}
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-3">
+              <div><p class="text-xs text-slate-500">Supplier</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.supplier || '—' }}</p></div>
+              <div><p class="text-xs text-slate-500">Lifecycle</p><p class="text-sm font-medium text-slate-900">{{ isActive(selectedBatch) ? 'Active' : 'Inactive' }}</p></div>
+              <div><p class="text-xs text-slate-500">Initial Quantity</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.initialQuantity }}</p></div>
+              <div><p class="text-xs text-slate-500">Current Quantity</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.currentQuantity }}</p></div>
+              <div><p class="text-xs text-slate-500">Minimum Stock</p><p class="text-sm font-medium text-slate-900">{{ selectedBatch.minimumStock }}</p></div>
+              <div><p class="text-xs text-slate-500">Expiration Date</p><p class="text-sm font-medium text-slate-900">{{ formatDate(selectedBatch.expirationDate) }}</p></div>
+              <div class="col-span-2"><p class="text-xs text-slate-500">Received Date</p><p class="text-sm font-medium text-slate-900">{{ formatDate(selectedBatch.receivedDate) }}</p></div>
+            </div>
+          </div>
+          <p class="text-xs text-slate-400">
+            Detailed movement/audit history isn't wired up here yet — your current API doesn't expose a per-batch history
+            endpoint. Add one on the backend (e.g. an AuditLog tied to InventoryID) and this drawer can list it here.
+          </p>
+        </div>
+
+        <div class="border-t border-slate-200 p-4 flex items-center gap-2 shrink-0">
+          <button @click="openEditModal(selectedBatch)" class="flex-1 text-sm font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">Edit Batch</button>
+          <button @click="closeDrawer" class="text-sm font-semibold px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-50 transition-colors">Close</button>
+        </div>
+      </aside>
     </transition>
   </div>
 </template>

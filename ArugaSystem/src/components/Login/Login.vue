@@ -8,7 +8,7 @@ const API_BASE_URL = "http://localhost:57147/api/auth"
 const router = useRouter()
 
 // =====================================================
-// FORM STATE
+// FORM STATE 
 // =====================================================
 
 const identifier = ref("")
@@ -33,7 +33,7 @@ const canSubmit = computed(() =>
 function redirectForRole(role) {
   switch (role) {
     case "Parent":
-      router.push("/ParentHome")
+      router.push("/Dashboard")
       break
 
     // Doctor and Nurse share the same homepage in the current router.
@@ -124,7 +124,7 @@ async function handleLogin() {
       class="hidden lg:flex lg:w-1/2 relative bg-cover bg-center"
       style="background-image: url('https://images.unsplash.com/photo-1584515933487-779824d29309');"
     >
-      <div class="absolute inset-0 bg-gradient-to-b from-green-900/80 via-green-800/75 to-green-700/85"></div>
+      <div class="absolute inset-0 bg-linear-to-brom-green-900/80 via-green-800/75 to-green-700/85"></div>
 
       <div class="relative z-10 h-full w-full flex flex-col justify-between p-12 text-white">
         <div>
@@ -149,7 +149,7 @@ async function handleLogin() {
 
     <!-- RIGHT SIDE -->
     <div class="w-full lg:w-1/2 bg-[#fff8ec] flex items-center justify-center px-6 py-10">
-      <form class="w-full max-w-[420px] bg-white rounded-3xl shadow-xl p-10" @submit.prevent="handleLogin">
+      <form class="w-full max-w-105 bg-white rounded-3xl shadow-xl p-10" @submit.prevent="handleLogin">
         <div class="mb-8">
           <h2 class="text-3xl font-black text-[#2d3a26]">Welcome to Aruga</h2>
           <p class="text-gray-500 mt-2">Sign in to continue to your account.</p>

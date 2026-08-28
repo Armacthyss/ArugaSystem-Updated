@@ -7,6 +7,13 @@ import Login        from '@/components/Login/Login.vue';
 import ParentHome   from '@/components/ParentViews/ParentHomepage.vue';
 import AdminHomepage from '@/components/Admin/AdminHomepage.vue';
 
+import ParentOverview from '@/components/ParentViews/Views/Parentoverview.vue';
+import ParentCheckin from '@/components/ParentViews/Views/Checkin.vue';
+import ParentSchedule from '@/components/ParentViews/Views/Scheduled.vue';
+import ParentRecords from '@/components/ParentViews/Views/Record.vue';
+
+
+
 // ── Admin sub-pages (add these — match your actual filenames) ─
 import StaffCalendar         from '@/components/Admin/StaffCalendar.vue';
 import StaffChildRecord      from '@/components/Admin/StaffChildRecord.vue';
@@ -46,6 +53,10 @@ const routes = [
  { path: '/',       component: Login        },
   { path: '/ParentHome',  component: ParentHome   },
   { path: '/AdminHome',   component: AdminHomepage },
+  {path: '/ParentOverview', component: ParentOverview},
+  {path: '/ParentCheckin', component: ParentCheckin},
+  {path: '/ParentRecords', component: ParentRecords},
+  {path: '/ParentSchedule', component: ParentSchedule},
 
   // ── Doctor / Nurse (new) ───────────────────────────────────
   { path: '/doctor/home',     name: 'DoctorHome',     component: DoctorHomepage },

@@ -160,19 +160,51 @@ namespace AndroidWebAPI.Data
 
 
         // ── Dashboard ─────────────────────────────────────────────
-        public async Task<dynamic> GetDashboardData(Guid parentId)
-        {
-            using IDbConnection connection = new SqlConnection(_connectionString);
-            string sql = @"
-                SELECT
-                    p.FirstName + ' ' + p.LastName AS ParentFullName,
-                    c.*
-                FROM dbo.Parents p
-                LEFT JOIN dbo.Children c ON p.ParentID = c.ParentID
-                WHERE p.ParentID = @Id";
+       
 
-            return await connection.QueryAsync<dynamic>(sql, new { Id = parentId });
-        }
+
+       public async Task<dynamic> GetDashboardData(Guid parentId)
+{
+    using IDbConnection connection = new SqlConnection(_connectionString);
+
+    string sql = @"
+        SELECT
+            p.ParentID,
+            p.FirstName + ' ' + p.LastName AS ParentFullName,
+
+            c.ChildID,
+            c.FirstName,
+            c.MiddleName,
+            c.LastName,
+            c.BirthDate,
+            c.PlaceOfBirth,
+            c.Sex,
+            c.Barangay,
+            c.Address,
+            c.HealthCenter,
+
+            cpr.RelationshipType,
+            cpr.IsPrimaryContact,
+            cpr.CanReceiveNotifications
+
+        FROM dbo.Parents p
+
+        INNER JOIN dbo.ChildParentRelationship cpr
+            ON p.ParentID = cpr.ParentID
+
+        INNER JOIN dbo.Children c
+            ON cpr.ChildID = c.ChildID
+
+        WHERE p.ParentID = @Id
+          AND cpr.Status = 'Active';
+
+    ";
+
+    return await connection.QueryAsync<dynamic>(
+        sql,
+        new { Id = parentId }
+    );
+}
 public async Task<Parent> CreateAsync(Parent parent)
 {
     using IDbConnection connection = new SqlConnection(_connectionString);
