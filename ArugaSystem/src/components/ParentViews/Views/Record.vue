@@ -204,7 +204,7 @@ const filteredRecords = computed(() => {
 // ── Actions ────────────────────────────────────────────────────────────────
 function handleLogout() {
   localStorage.removeItem('parentUser')
- // router.push('/Login')
+ // router.push('/')
 }
 
 function handleSelectChild(child) {
@@ -213,17 +213,12 @@ function handleSelectChild(child) {
   fetchRecords(child.childID)
 }
 
-// FIX: fetchRecords stores raw completed records in completedRecords ref
-// THEN builds the combined vaccinationHistory (completed + computed
-// upcoming) AFTER completedRecords is set — no circular dependency.
 async function fetchRecords(childId) {
   if (!childId) return
   recordsLoading.value = true
   try {
     const res = await axios.get(`${API_BASE_URL}/api/VaccinationRecords/child/${childId}`)
     completedRecords.value = res.data
-
-    // Wait one tick so computedVaccineList updates with fresh completedRecords
     await new Promise(r => setTimeout(r, 0))
 
     const today = new Date()
@@ -274,7 +269,7 @@ async function fetchUnreadCount() {
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 onMounted(async () => {
   const savedUser = localStorage.getItem('parentUser')
-  if (!savedUser) { //router.push('/Login'); 
+  if (!savedUser) { //router.push('/'); 
   return }
   parentData.value = JSON.parse(savedUser)
 

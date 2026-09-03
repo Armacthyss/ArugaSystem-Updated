@@ -21,7 +21,9 @@ namespace AndroidWebAPI.Models
         public string? ContactNo { get; set; }
         public string? Address { get; set; }
 
-        public string UserType { get; set; } = string.Empty;  // 'Doctor' | 'Nurse' | 'Staff' | 'Admin'
+        public string UserType { get; set; } = "Healthcare";
+
+public string Position { get; set; } = string.Empty;
         public string? PRCNo { get; set; }
         public string AccountStatus { get; set; } = "Active";
     }

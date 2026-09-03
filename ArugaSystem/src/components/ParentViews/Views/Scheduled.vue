@@ -276,7 +276,7 @@ watch(selectedVax, (vax) => {
 // ── Actions ────────────────────────────────────────────────────────────────
 function handleLogout() {
   localStorage.removeItem('parentUser')
- // router.push('/Login')
+ // router.push('/')
 }
 
 function handleSelectChild(child) {
@@ -310,7 +310,7 @@ async function fetchUnreadCount() {
 onMounted(async () => {
   const savedUser = localStorage.getItem('parentUser')
   if (!savedUser) {
-    // router.push('/Login'); 
+    // router.push('/'); 
      return }
   parentData.value = JSON.parse(savedUser)
 

@@ -10,7 +10,7 @@ export function useParentSession() {
     const savedUser = localStorage.getItem('parentUser')
 
     if (!savedUser) {
-      router.push('/Login')
+      router.push('/')
       return null
     }
 
@@ -21,7 +21,7 @@ export function useParentSession() {
       console.error('Invalid parent session:', error)
 
       localStorage.removeItem('parentUser')
-      router.push('/Login')
+      router.push('/')
 
       return null
     }
@@ -33,7 +33,7 @@ export function useParentSession() {
 
     parentData.value = null
 
-    router.push('/Login')
+    router.push('/')
   }
 
   return {

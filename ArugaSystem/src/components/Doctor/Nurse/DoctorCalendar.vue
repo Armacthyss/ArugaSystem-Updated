@@ -534,7 +534,7 @@ function initials(name) {
 function logout() {
   localStorage.removeItem('aruga_user')
   localStorage.removeItem('aruga_token')
-  router.push('/login')
+  router.push('/')
 }
 </script>
 

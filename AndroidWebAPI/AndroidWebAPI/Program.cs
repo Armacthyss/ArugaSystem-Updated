@@ -5,7 +5,14 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using AndroidWebAPI.DTOs;
+using AndroidWebAPI.Repositories;
+using AndroidWebAPI.Services;
 var builder = WebApplication.CreateBuilder(args);
+
+var hash = BCrypt.Net.BCrypt.HashPassword("Admin12345");
+Console.WriteLine("ADMIN HASH:");
+Console.WriteLine(hash);
+
 
 // ── Ports ────────────────────────────────────────────────────
 builder.WebHost.UseUrls(
@@ -47,6 +54,12 @@ builder.Services.AddScoped<VaccineRepository>();
 builder.Services.AddScoped<VaccineDoseRepository>();
 builder.Services.AddScoped<VaccineInventoryRepository>();
 builder.Services.AddScoped<IVaccinationTimelineRepository, VaccinationTimelineRepository>();
+builder.Services.AddScoped<IQueueRepository, QueueRepository>();
+builder.Services.AddScoped<IQueueQRSettingRepository, QueueQRSettingRepository>();
+builder.Services.AddScoped<IQueueQRCodeRepository, QueueQRCodeRepository>();
+builder.Services.AddScoped<IQueueQRCodeRepository, QueueQRCodeRepository>();
+builder.Services.AddScoped<IClinicOperatingScheduleRepository, ClinicOperatingScheduleRepository>();
+
 builder.Services.AddScoped<
     IChildParentRelationshipRepository,
     ChildParentRelationshipRepository>();
@@ -92,6 +105,12 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddHostedService<NotificationGeneratorService>();  // ← only once
+// Queue QR Code
+builder.Services.AddScoped<IQueueQRCodeRepository, QueueQRCodeRepository>();
+builder.Services.AddScoped<IQueueQRCodeService, QueueQRCodeService>();
+
+// Clinic Schedule
+builder.Services.AddScoped<IClinicOperatingScheduleRepository, ClinicOperatingScheduleRepository>();
 
 // ── Build ─────────────────────────────────────────────────────
 var app = builder.Build();

@@ -61,7 +61,7 @@ async function handleLogin() {
 }
 
 // ─── Navigation helpers for the footer links ─────────────────
-function goParentLogin() { router.push('/Login') }
+function goParentLogin() { router.push('/') }
 function goAdminLogin()  { router.push('/admin-login')  }
 </script>
 

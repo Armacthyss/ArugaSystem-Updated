@@ -116,7 +116,7 @@
         <p class="text-center text-sm mt-2 text-gray-500">
           Parent Portal?
           <span
-            @click="$router.push('/Login')"
+            @click="$router.push('/')"
             class="text-[#546b41] font-bold cursor-pointer hover:underline"
           >
             Login here

@@ -59,7 +59,7 @@
             <div class="bg-white rounded-4xl border border-slate-100 p-7 shadow-sm">
               <div class="flex justify-between items-center mb-5">
                 <h3 class="text-base font-black text-slate-800">Upcoming Doses</h3>
-                <router-link to="/parent/scheduled" class="text-[10px] font-black text-[#99ad7a] uppercase tracking-widest hover:text-[#5d6b52] transition-colors">View Schedule →</router-link>
+                <router-link to="/ParentSchedule" class="text-[10px] font-black text-[#99ad7a] uppercase tracking-widest hover:text-[#5d6b52] transition-colors">View Schedule →</router-link>
               </div>
               <div class="space-y-3">
                 <div v-for="vax in upcomingDoses.slice(0, 3)" :key="vax.doseId"
@@ -97,7 +97,7 @@ import ChildSidebar from '../Components/Childsidebar.vue'
 import ProfileModal from '../Components/Profilemodal.vue'
 import NotificationPanel from '../Components/Notificationpanel.vue'
 
-import { getCurrentParent, logout } from '../Composables/useAuth.js'  
+import { getAccount } from '@/utils/auth'
 import api from '../Composables/api.js'
 
 const router = useRouter()
@@ -244,38 +244,31 @@ const upcomingDoses = computed(() => {
 // =====================================================
 
 function loadParentSession() {
-
-  const savedAccount = getAccount()
+  const savedAccount = getCurrentParent()
 
   if (!savedAccount) {
-    router.push('/Login')
+    router.push('/')
     return false
   }
 
   account.value = savedAccount
 
-  // Backend returns parent information inside "user"
+  // Support both possible backend response structures
   parentData.value =
-    savedAccount.user ?? null
+    savedAccount.user ?? savedAccount
 
-  // Make sure this is actually a parent
-  if (
-    !parentData.value?.parentID ||
-    savedAccount.role !== 'Parent'
-  ) {
+  if (!parentData.value?.parentID) {
     console.error(
       'Invalid parent session:',
       savedAccount
     )
 
-    router.push('/Login')
-
+    router.push('/')
     return false
   }
 
   return true
 }
-
 
 // =====================================================
 // LOAD CHILDREN
@@ -284,13 +277,24 @@ function loadParentSession() {
 async function fetchChildren() {
 
   if (!parentData.value?.parentID) {
+    console.error('No ParentID available')
     return
   }
 
   try {
 
+    console.log(
+      'Fetching children for ParentID:',
+      parentData.value.parentID
+    )
+
     const response = await api.get(
-      `/Parents/${parentData.value.parentID}/dashboard`
+      `/Parents/dashboard/${parentData.value.parentID}`
+    )
+
+    console.log(
+      'Parent dashboard response:',
+      response.data
     )
 
     children.value =
@@ -348,6 +352,11 @@ async function fetchChildren() {
           child.CanReceiveNotifications
       }))
 
+    console.log(
+      'Loaded children:',
+      children.value
+    )
+
   } catch (error) {
 
     console.error(
@@ -358,8 +367,6 @@ async function fetchChildren() {
     children.value = []
   }
 }
-
-
 // =====================================================
 // RESTORE SELECTED CHILD
 // =====================================================
@@ -505,7 +512,7 @@ function handleLogout() {
 
   logout()
 
-  router.push('/Login')
+  router.push('/')
 }
 
 

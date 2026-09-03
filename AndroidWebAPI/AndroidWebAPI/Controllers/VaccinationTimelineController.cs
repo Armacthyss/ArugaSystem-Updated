@@ -1,115 +1,128 @@
-using AndroidWebAPI.Data;
-using Microsoft.AspNetCore.Mvc;
-using AndroidWebAPI.DTOs;
+    using AndroidWebAPI.Data;
+    using Microsoft.AspNetCore.Mvc;
+    using AndroidWebAPI.DTOs;
 
-namespace AndroidWebAPI.Controllers
-{
-    [ApiController]
-    [Route("api/[controller]")]
-    public class VaccinationTimelineController : ControllerBase
+    namespace AndroidWebAPI.Controllers
     {
-        private readonly IVaccinationTimelineRepository _repository;
-
-        public VaccinationTimelineController(IVaccinationTimelineRepository repository)
+        [ApiController]
+        [Route("api/[controller]")]
+        public class VaccinationTimelineController : ControllerBase
         {
-            _repository = repository;
-        }
+            private readonly IVaccinationTimelineRepository _repository;
 
-        // GET: api/VaccinationTimeline
-        [HttpGet]
-        public async Task<IActionResult> GetAll()
-        {
-            var timelines = await _repository.GetAllAsync();
-            return Ok(timelines);
-        }
-
-        // GET: api/VaccinationTimeline/{timelineId}
-        [HttpGet("{timelineId}")]
-        public async Task<IActionResult> GetById(Guid timelineId)
-        {
-            var timeline = await _repository.GetByIdAsync(timelineId);
-
-            if (timeline == null)
-                return NotFound();
-
-            return Ok(timeline);
-        }
-
-        // GET: api/VaccinationTimeline/child/{childId}
-        [HttpGet("child/{childId}")]
-        public async Task<IActionResult> GetByChild(Guid childId)
-        {
-            var timelines = await _repository.GetByChildAsync(childId);
-            return Ok(timelines);
-        }
-
-        // POST: api/VaccinationTimeline/generate/{childId}
-        [HttpPost("generate/{childId}")]
-        public async Task<IActionResult> Generate(Guid childId)
-        {
-            await _repository.GenerateTimelineAsync(childId);
-
-            return Ok(new
+            public VaccinationTimelineController(IVaccinationTimelineRepository repository)
             {
-                message = "Vaccination timeline generated successfully."
-            });
-        }
+                _repository = repository;
+            }
 
-        // PUT: api/VaccinationTimeline/complete/{timelineId}
-        [HttpPut("complete/{timelineId}")]
-        public async Task<IActionResult> MarkCompleted(Guid timelineId)
-        {
-            await _repository.MarkCompletedAsync(timelineId);
-
-            return Ok(new
+            // GET: api/VaccinationTimeline
+            [HttpGet]
+            public async Task<IActionResult> GetAll()
             {
-                message = "Vaccination marked as completed."
-            });
-        }
+                var timelines = await _repository.GetAllAsync();
+                return Ok(timelines);
+            }
 
-        // POST: api/VaccinationTimeline/regenerate/{childId}
-        [HttpPost("regenerate/{childId}")]
-        public async Task<IActionResult> Regenerate(Guid childId)
-        {
-            await _repository.RegenerateTimelineAsync(childId);
-
-            return Ok(new
+            // GET: api/VaccinationTimeline/{timelineId}
+            [HttpGet("{timelineId}")]
+            public async Task<IActionResult> GetById(Guid timelineId)
             {
-                message = "Vaccination timeline regenerated."
-            });
-        }
+                var timeline = await _repository.GetByIdAsync(timelineId);
 
-        // GET: api/VaccinationTimeline/due-today
-        [HttpGet("due-today")]
-        public async Task<IActionResult> GetDueToday()
-        {
-            var timelines = await _repository.GetDueTodayAsync();
-            return Ok(timelines);
-        }
+                if (timeline == null)
+                    return NotFound();
 
-        // GET: api/VaccinationTimeline/upcoming/{days}
-        [HttpGet("upcoming/{days}")]
-        public async Task<IActionResult> GetUpcoming(int days)
-        {
-            var timelines = await _repository.GetUpcomingAsync(days);
-            return Ok(timelines);
-        }
-   [HttpGet("summary/{childId}")]
-public async Task<IActionResult> GetSummary(Guid childId)
+                return Ok(timeline);
+            }
+
+            // GET: api/VaccinationTimeline/child/{childId}
+            [HttpGet("child/{childId}")]
+public async Task<IActionResult> GetByChild(Guid childId)
 {
-    var summary = await _repository.GetTimelineSummaryAsync(childId);
-    return Ok(summary);
-}
+    var timelines = await _repository.GetByChildAsync(childId);
 
-[HttpPut("update-missed")]
-public async Task<IActionResult> UpdateMissed()
-{
-    await _repository.UpdateMissedVaccinationsAsync();
-
-    return Ok(new
+    var result = timelines.Select(t => new
     {
-        message = "Missed vaccinations updated successfully."
+        timelineID = t.TimelineID,
+        vaccineID = t.VaccineID,
+        vaccineName = t.Vaccine?.VaccineName ?? "Unknown",
+        doseNumber = t.DoseNumber,
+        expectedDate = t.ExpectedDate,
+        scheduledDate = t.ScheduledDate,
+        status = t.Status,
+        vaccinationRecordID = t.VaccinationRecordID
     });
+
+    return Ok(result);
 }
+
+            // POST: api/VaccinationTimeline/generate/{childId}
+            [HttpPost("generate/{childId}")]
+            public async Task<IActionResult> Generate(Guid childId)
+            {
+                await _repository.GenerateTimelineAsync(childId);
+
+                return Ok(new
+                {
+                    message = "Vaccination timeline generated successfully."
+                });
+            }
+
+            // PUT: api/VaccinationTimeline/complete/{timelineId}
+            [HttpPut("complete/{timelineId}")]
+            public async Task<IActionResult> MarkCompleted(Guid timelineId)
+            {
+                await _repository.MarkCompletedAsync(timelineId);
+
+                return Ok(new
+                {
+                    message = "Vaccination marked as completed."
+                });
+            }
+
+            // POST: api/VaccinationTimeline/regenerate/{childId}
+            [HttpPost("regenerate/{childId}")]
+            public async Task<IActionResult> Regenerate(Guid childId)
+            {
+                await _repository.RegenerateTimelineAsync(childId);
+
+                return Ok(new
+                {
+                    message = "Vaccination timeline regenerated."
+                });
+            }
+
+            // GET: api/VaccinationTimeline/due-today
+            [HttpGet("due-today")]
+            public async Task<IActionResult> GetDueToday()
+            {
+                var timelines = await _repository.GetDueTodayAsync();
+                return Ok(timelines);
+            }
+
+            // GET: api/VaccinationTimeline/upcoming/{days}
+            [HttpGet("upcoming/{days}")]
+            public async Task<IActionResult> GetUpcoming(int days)
+            {
+                var timelines = await _repository.GetUpcomingAsync(days);
+                return Ok(timelines);
+            }
+    [HttpGet("summary/{childId}")]
+    public async Task<IActionResult> GetSummary(Guid childId)
+    {
+        var summary = await _repository.GetTimelineSummaryAsync(childId);
+        return Ok(summary);
     }
-}
+
+    [HttpPut("update-missed")]
+    public async Task<IActionResult> UpdateMissed()
+    {
+        await _repository.UpdateMissedVaccinationsAsync();
+
+        return Ok(new
+        {
+            message = "Missed vaccinations updated successfully."
+        });
+    }
+        }
+    }

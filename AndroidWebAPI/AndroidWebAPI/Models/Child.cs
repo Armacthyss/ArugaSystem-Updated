@@ -23,6 +23,7 @@ namespace AndroidWebAPI.Models
         public int? Barangay { get; set; }
 
         public string? Sex { get; set; }
+        public string? Allergies { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

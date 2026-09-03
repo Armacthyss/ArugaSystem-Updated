@@ -1,24 +1,20 @@
 <script setup>
 import { ref, computed, reactive, onMounted } from 'vue'
 import axios from 'axios'
+import AppSidebar from './Components/AppSidebar.vue'
+import AppHeader from './Components/AppHeader.vue'
 
 const API_BASE_URL = 'http://localhost:57147/api'
 
-/* ----------------------------- Sidebar state ------------------------------ */
-const isCollapsed = ref(false)
-const toggleSidebar = () => (isCollapsed.value = !isCollapsed.value)
-
-const navItems = [
-  { label: 'Dashboard', icon: '🏠' },
-  { label: 'User Management', icon: '👥' },
-  { label: 'Vaccine Management', icon: '💉' },
-  { label: 'Inventory', icon: '📦' },
-  { label: 'Notifications', icon: '🔔' },
-  { label: 'Reports', icon: '📊' },
-  { label: 'Audit Logs', icon: '📋' },
-  { label: 'Settings', icon: '⚙️' },
-]
+/* ----------------------------- Layout state (page-level) ------------------------------ */
+// Sidebar owns its own collapse state internally now. This page only needs
+// to know/track which nav item is active — pass this to AppSidebar as a
+// v-model. Swap this for vue-router's current route once that's wired up.
 const activeNav = ref('User Management')
+function handleLogout() {
+  // Hook up real logout / redirect logic here.
+  console.log('logout clicked')
+}
 
 /* -------------------------------- Role meta -------------------------------- */
 // Matches the backend's actual roles. "Parent" comes from AccountType = Parent,
@@ -206,23 +202,28 @@ const addForm = reactive({
   firstName: '',
   middleName: '',
   lastName: '',
-  username: '',      // Doctor / Nurse / Staff only
-  licenseNumber: '', // Doctor / Nurse only
+  licenseNumber: '',
   email: '',
   contactNo: '',
   address: '',
-  barangayNo: '',    // Parent only
+  barangayNo: '',
 })
 
 const isPersonnelRole = computed(() => addForm.role !== 'Parent')
 const showLicenseField = computed(() => addForm.role === 'Doctor' || addForm.role === 'Nurse')
 
 const openAddModal = () => {
-  Object.assign(addForm, {
-    role: 'Parent', firstName: '', middleName: '', lastName: '',
-    username: '', licenseNumber: '', email: '', contactNo: '',
-    address: '', barangayNo: '',
-  })
+ Object.assign(addForm, {
+  role: 'Parent',
+  firstName: '',
+  middleName: '',
+  lastName: '',
+  licenseNumber: '',
+  email: '',
+  contactNo: '',
+  address: '',
+  barangayNo: '',
+})
   createError.value = ''
   showAddModal.value = true
 }
@@ -230,7 +231,6 @@ const openAddModal = () => {
 const canCreate = computed(() => {
   if (!addForm.firstName.trim() || !addForm.lastName.trim()) return false
   if (!addForm.email.trim() || !addForm.contactNo.trim()) return false
-  if (isPersonnelRole.value && !addForm.username.trim()) return false
   return true
 })
 
@@ -245,8 +245,9 @@ async function createUser() {
   isCreating.value = true
 
   try {
-    let temporaryPassword = ''
-    let createdName = `${addForm.firstName} ${addForm.lastName}`
+   let temporaryPassword = ''
+let generatedUsername = ''
+let createdName = `${addForm.firstName} ${addForm.lastName}`
 
     if (addForm.role === 'Parent') {
       const response = await axios.post(`${API_BASE_URL}/Parents`, {
@@ -261,23 +262,28 @@ async function createUser() {
       temporaryPassword = response.data.temporaryPassword
     } else {
       const response = await axios.post(`${API_BASE_URL}/accounts/personnel`, {
-        firstName: addForm.firstName,
-        middleName: addForm.middleName || null,
-        lastName: addForm.lastName,
-        username: addForm.username,
-        role: addForm.role,
-        licenseNumber: showLicenseField.value ? (addForm.licenseNumber || null) : null,
-        email: addForm.email,
-        contactNo: addForm.contactNo,
-        address: addForm.address || null,
-      })
-      temporaryPassword = response.data.temporaryPassword
+  firstName: addForm.firstName,
+  middleName: addForm.middleName || null,
+  lastName: addForm.lastName,
+  role: addForm.role,
+  licenseNumber: showLicenseField.value ? (addForm.licenseNumber || null) : null,
+  email: addForm.email,
+  contactNo: addForm.contactNo,
+  address: addForm.address || null,
+})
+
+generatedUsername = response.data.account?.username || ''
+temporaryPassword = response.data.temporaryPassword
     }
 
     showAddModal.value = false
     await fetchUsers()
 
-    tempPasswordResult.value = { name: createdName, password: temporaryPassword }
+    tempPasswordResult.value = {
+  name: createdName,
+  username: generatedUsername,
+  password: temporaryPassword,
+}
     showTempPasswordModal.value = true
 
   } catch (error) {
@@ -297,70 +303,12 @@ async function createUser() {
 
 <template>
   <div class="min-h-screen bg-slate-50 flex text-slate-900" @click="closeMenu">
-    <!-- ============================ SIDEBAR ============================ -->
-    <aside
-      :class="[isCollapsed ? 'w-20' : 'w-[260px]']"
-      class="hidden md:flex flex-col shrink-0 sticky top-0 h-screen bg-white border-r border-slate-200 transition-all duration-300 ease-in-out"
-    >
-      <div class="h-[70px] flex items-center gap-3 px-5 border-b border-slate-200 shrink-0">
-        <div class="w-9 h-9 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
-          <span class="text-white font-bold text-sm">A</span>
-        </div>
-        <span v-if="!isCollapsed" class="font-bold text-slate-900 tracking-tight whitespace-nowrap overflow-hidden">Aruga</span>
-      </div>
-
-      <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-        <button
-          v-for="item in navItems"
-          :key="item.label"
-          @click="activeNav = item.label"
-          :class="[
-            activeNav === item.label ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900',
-          ]"
-          class="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-        >
-          <span class="text-base shrink-0" aria-hidden="true">{{ item.icon }}</span>
-          <span v-if="!isCollapsed" class="truncate">{{ item.label }}</span>
-        </button>
-      </nav>
-
-      <div class="border-t border-slate-200 p-3 shrink-0 space-y-2">
-        <div class="flex items-center gap-3 px-2 py-2">
-          <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">RM</div>
-          <div v-if="!isCollapsed" class="min-w-0">
-            <p class="text-sm font-semibold text-slate-900 truncate">Renzo Miguel</p>
-            <p class="text-xs text-slate-500 truncate">System Admin</p>
-          </div>
-        </div>
-        <button class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400">
-          <span class="text-base shrink-0" aria-hidden="true">🚪</span>
-          <span v-if="!isCollapsed">Log out</span>
-        </button>
-        <button @click="toggleSidebar" class="w-full flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors">
-          <span :class="isCollapsed ? 'rotate-180' : ''" class="transition-transform inline-block">◀</span>
-        </button>
-      </div>
-    </aside>
+    <!-- ============================ SIDEBAR (shared component) ============================ -->
+    <AppSidebar v-model:active-nav="activeNav" @logout="handleLogout" />
 
     <!-- ============================ MAIN ============================ -->
     <div class="flex-1 min-w-0 flex flex-col">
-      <!-- Top navbar -->
-      <header class="h-[70px] sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-6 gap-4">
-        <div class="min-w-0">
-          <h1 class="text-lg font-bold text-slate-900 truncate">User Management</h1>
-          <p class="text-xs text-slate-500 truncate">Dashboard / User Management</p>
-        </div>
-        <div class="flex items-center gap-3 shrink-0">
-          <button class="relative w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-            <span aria-hidden="true">🔔</span>
-            <span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white"></span>
-          </button>
-          <button class="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-            <span aria-hidden="true">⚙️</span>
-          </button>
-          <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">RM</div>
-        </div>
-      </header>
+      <AppHeader title="User Management" breadcrumb="Dashboard / User Management" />
 
       <!-- Content -->
       <main class="p-6 space-y-6">
@@ -632,11 +580,7 @@ async function createUser() {
               <input v-model="addForm.lastName" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
             </div>
 
-            <!-- Personnel-only: Username -->
-            <div v-if="isPersonnelRole">
-              <label class="block text-xs font-semibold text-slate-500 mb-1.5">Username</label>
-              <input v-model="addForm.username" type="text" class="w-full text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors" />
-            </div>
+            
 
             <!-- Doctor/Nurse-only: License number -->
             <div v-if="showLicenseField">
@@ -697,12 +641,38 @@ async function createUser() {
             Share this with <span class="font-semibold text-slate-700">{{ tempPasswordResult?.name }}</span> — it's shown only once here, so copy it now.
           </p>
 
-          <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3 mb-2">
-            <code class="flex-1 text-sm font-mono font-semibold text-slate-900 tracking-wide select-all">{{ tempPasswordResult?.password }}</code>
-            <button @click="copyTempPassword" class="text-xs font-semibold px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shrink-0">
-              Copy
-            </button>
-          </div>
+          <!-- GENERATED USERNAME -->
+<div class="mb-3">
+  <p class="text-xs font-semibold text-slate-500 mb-1.5">
+    Username
+  </p>
+
+  <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3">
+    <code class="flex-1 text-sm font-mono font-semibold text-slate-900 select-all">
+      {{ tempPasswordResult?.username }}
+    </code>
+  </div>
+</div>
+
+<!-- TEMPORARY PASSWORD -->
+<div class="mb-3">
+  <p class="text-xs font-semibold text-slate-500 mb-1.5">
+    Temporary Password
+  </p>
+
+  <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3">
+    <code class="flex-1 text-sm font-mono font-semibold text-slate-900 tracking-wide select-all">
+      {{ tempPasswordResult?.password }}
+    </code>
+
+    <button
+      @click="copyTempPassword"
+      class="text-xs font-semibold px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shrink-0"
+    >
+      Copy
+    </button>
+  </div>
+</div>
           <p v-if="copyStatus" class="text-xs text-emerald-600 mb-4">{{ copyStatus }}</p>
           <p v-else class="text-xs text-transparent mb-4">placeholder</p>
 

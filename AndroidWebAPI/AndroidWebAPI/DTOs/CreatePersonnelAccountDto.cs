@@ -6,8 +6,6 @@ namespace AndroidWebAPI.DTOs
         public string? MiddleName { get; set; }
         public string LastName { get; set; } = string.Empty;
 
-        public string Username { get; set; } = string.Empty;
-
         public string? ContactNo { get; set; }
 
         public string Role { get; set; } = string.Empty;

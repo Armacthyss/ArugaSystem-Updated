@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import {
   Home, Users, Syringe, Package, Bell, BarChart2, FileText, Settings,
   LogOut, Search, QrCode, UserPlus, CalendarDays, ChevronLeft, ChevronRight,
@@ -7,13 +7,7 @@ import {
   ClipboardList, Eye, UserCog, DoorOpen, TrendingUp, TrendingDown,
 } from "lucide-vue-next";
 
-/* ---------------------------------------------------------
-   Aruga Pediatric System — Staff Dashboard (Vue 3 + Tailwind)
-   Same design language as the Admin module: sidebar, top bar,
-   card system, table system, radii, shadows. Palette refined:
-   deep clinical teal + warm neutral paper background + a
-   disciplined status-color set for the queue.
---------------------------------------------------------- */
+
 
 const collapsed = ref(false);
 
@@ -28,14 +22,82 @@ const navItems = [
   { icon: Settings, label: "Settings" },
 ];
 
-const summaryCards = [
-  { label: "Today's Appointments", value: "48", trend: "+6%", up: true, icon: CalendarDays, tint: "text-emerald-700", tintBg: "bg-emerald-50" },
-  { label: "Patients Waiting", value: "12", trend: "+2", up: true, icon: Clock, tint: "text-amber-700", tintBg: "bg-amber-50" },
-  { label: "In Progress", value: "5", trend: "steady", up: null, icon: Activity, tint: "text-sky-700", tintBg: "bg-sky-50" },
-  { label: "Completed Today", value: "27", trend: "+9%", up: true, icon: CheckCircle2, tint: "text-emerald-700", tintBg: "bg-emerald-50" },
-  { label: "Late Patients", value: "4", trend: "-1", up: false, icon: AlertTriangle, tint: "text-rose-700", tintBg: "bg-rose-50" },
-  { label: "Available Healthworkers", value: "6", trend: "of 9", up: null, icon: UserCog, tint: "text-sky-700", tintBg: "bg-sky-50" },
-];
+const waitingCount = computed(() =>
+  queue.value.filter(q => q.status === "Waiting").length
+);
+
+const readyCount = computed(() =>
+  queue.value.filter(q => q.status === "Ready").length
+);
+
+const inProgressCount = computed(() =>
+  queue.value.filter(q => q.status === "In Progress").length
+);
+
+const completedCount = computed(() =>
+  queue.value.filter(q => q.status === "Completed").length
+);
+
+const lateCount = computed(() =>
+  queue.value.filter(q => q.status === "Late").length
+);
+
+const summaryCards = computed(() => [
+  {
+    label: "Today's Appointments",
+    value: "—",
+    trend: "Coming next",
+    up: null,
+    icon: CalendarDays,
+    tint: "text-emerald-700",
+    tintBg: "bg-emerald-50",
+  },
+  {
+    label: "Patients Waiting",
+    value: queue.value.filter(q => q.status === "Waiting").length,
+    trend: "today",
+    up: null,
+    icon: Clock,
+    tint: "text-amber-700",
+    tintBg: "bg-amber-50",
+  },
+  {
+    label: "In Progress",
+    value: queue.value.filter(q => q.status === "In Progress").length,
+    trend: "today",
+    up: null,
+    icon: Activity,
+    tint: "text-sky-700",
+    tintBg: "bg-sky-50",
+  },
+  {
+    label: "Completed Today",
+    value: queue.value.filter(q => q.status === "Completed").length,
+    trend: "today",
+    up: null,
+    icon: CheckCircle2,
+    tint: "text-emerald-700",
+    tintBg: "bg-emerald-50",
+  },
+  {
+    label: "Late Patients",
+    value: queue.value.filter(q => q.status === "Late").length,
+    trend: "today",
+    up: null,
+    icon: AlertTriangle,
+    tint: "text-rose-700",
+    tintBg: "bg-rose-50",
+  },
+  {
+    label: "Available Healthworkers",
+    value: "—",
+    trend: "Coming next",
+    up: null,
+    icon: UserCog,
+    tint: "text-sky-700",
+    tintBg: "bg-sky-50",
+  },
+]);
 
 const quickActions = [
   { icon: UserPlus, label: "Register Child" },
@@ -60,15 +122,9 @@ const statusDot = {
   Late: "bg-rose-600",
 };
 
-const queue = [
-  { no: "Q-014", child: "Mika Santos", parent: "Liza Santos", time: "9:00 AM", worker: "Nurse Bea Fernandez", room: "Room 2", status: "In Progress" },
-  { no: "Q-015", child: "Julian Reyes", parent: "Mark Reyes", time: "9:15 AM", worker: "Dr. Elena Cruz", room: "Room 1", status: "Waiting" },
-  { no: "Q-016", child: "Ava Dizon", parent: "Carmen Dizon", time: "9:15 AM", worker: "—", room: "—", status: "Waiting" },
-  { no: "Q-017", child: "Noah Bautista", parent: "Ramon Bautista", time: "9:30 AM", worker: "Nurse Kim Uy", room: "Room 3", status: "Ready" },
-  { no: "Q-018", child: "Sophia Ramos", parent: "Ana Ramos", time: "8:45 AM", worker: "Dr. Elena Cruz", room: "Room 1", status: "Late" },
-  { no: "Q-019", child: "Gabriel Torres", parent: "Iris Torres", time: "9:45 AM", worker: "Nurse Bea Fernandez", room: "Room 2", status: "Completed" },
-  { no: "Q-020", child: "Zoe Manalo", parent: "Paolo Manalo", time: "10:00 AM", worker: "—", room: "—", status: "Waiting" },
-];
+const queue = ref([]);
+const loadingQueue = ref(false);
+const queueError = ref(null);
 
 const expected = [
   { child: "Julian Reyes", time: "9:15 AM", parent: "Mark Reyes", status: "Checked In" },
@@ -122,25 +178,123 @@ const activities = [
   { icon: AlertTriangle, text: "Sophia Ramos flagged as late for her 8:45 AM slot.", time: "51 min ago" },
 ];
 
-/* Queue overview donut — built with a conic-gradient, no chart library needed */
-const donutData = [
-  { name: "Waiting", value: 12, color: "#d97706", dot: "bg-amber-500" },
-  { name: "Ready", value: 6, color: "#0284c7", dot: "bg-sky-500" },
-  { name: "In Progress", value: 5, color: "#7c3aed", dot: "bg-violet-500" },
-  { name: "Completed", value: 27, color: "#059669", dot: "bg-emerald-600" },
-  { name: "Late", value: 4, color: "#e11d48", dot: "bg-rose-600" },
-];
-const donutTotal = donutData.reduce((s, d) => s + d.value, 0);
+/* Queue overview donut chart */
+
+const donutData = computed(() => [
+  {
+    name: "Waiting",
+    value: queue.value.filter(q => q.status === "Waiting").length,
+    color: "#d97706",
+    dot: "bg-amber-500",
+  },
+  {
+    name: "Ready",
+    value: queue.value.filter(q => q.status === "Ready").length,
+    color: "#0284c7",
+    dot: "bg-sky-500",
+  },
+  {
+    name: "In Progress",
+    value: queue.value.filter(q => q.status === "In Progress").length,
+    color: "#7c3aed",
+    dot: "bg-violet-500",
+  },
+  {
+    name: "Completed",
+    value: queue.value.filter(q => q.status === "Completed").length,
+    color: "#059669",
+    dot: "bg-emerald-600",
+  },
+  {
+    name: "Late",
+    value: queue.value.filter(q => q.status === "Late").length,
+    color: "#e11d48",
+    dot: "bg-rose-600",
+  },
+]);
+
+const donutTotal = computed(() =>
+  donutData.value.reduce((sum, item) => sum + item.value, 0)
+);
 
 const donutGradient = computed(() => {
+  if (donutTotal.value === 0) {
+    return "conic-gradient(#e7e5e4 0deg 360deg)";
+  }
+
   let start = 0;
-  const stops = donutData.map((d) => {
-    const end = start + (d.value / donutTotal) * 360;
-    const stop = `${d.color} ${start}deg ${end}deg`;
+
+  const stops = donutData.value.map((d) => {
+    const end =
+      start + (d.value / donutTotal.value) * 360;
+
+    const stop =
+      `${d.color} ${start}deg ${end}deg`;
+
     start = end;
+
     return stop;
   });
+
   return `conic-gradient(${stops.join(", ")})`;
+});
+
+
+const API_BASE = "http://localhost:57147/api";
+
+const loadQueue = async () => {
+  loadingQueue.value = true;
+  queueError.value = null;
+
+  try {
+    const response = await fetch(`${API_BASE}/Queue`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to load queue. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+queue.value = data.map((q) => ({
+  queueID: q.queueID,
+  queueNumber: q.queueNumber,
+
+  no: `Q-${String(q.queueNumber).padStart(3, "0")}`,
+
+  child:
+    q.children?.map(c => c.name).join(", ") || "—",
+
+  parent:
+    q.requestBy || "—",
+
+  time: "—",
+  worker: "—",
+  room: "—",
+
+  status:
+    q.status || "Waiting",
+}));
+  } catch (error) {
+    console.error("Queue loading error:", error);
+    queueError.value = error.message;
+  } finally {
+    loadingQueue.value = false;
+  }
+};
+let queueRefreshInterval = null;
+
+onMounted(() => {
+  loadQueue();
+
+  queueRefreshInterval = setInterval(() => {
+    loadQueue();
+  }, 5000);
+});
+
+onUnmounted(() => {
+  if (queueRefreshInterval) {
+    clearInterval(queueRefreshInterval);
+  }
 });
 </script>
 
@@ -266,10 +420,29 @@ const donutGradient = computed(() => {
         <div class="grid grid-cols-12 gap-6">
           <!-- Today's Queue -->
           <div class="col-span-8 rounded-2xl border border-stone-200 bg-white shadow-sm overflow-hidden">
+            
             <div class="flex items-center justify-between px-5 py-4 border-b border-stone-200">
-              <p class="text-[14px] font-semibold">Today's Queue</p>
-              <span class="text-[12px] text-stone-500">{{ queue.length }} patients in queue</span>
-            </div>
+  <div>
+    <p class="text-[14px] font-semibold">Today's Queue</p>
+
+    <span class="text-[12px] text-stone-500">
+      {{ queue.length }} patients in queue
+    </span>
+  </div>
+
+  <button
+    @click="loadQueue"
+    :disabled="loadingQueue"
+    class="flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-[12px] font-medium text-stone-600 hover:bg-stone-50 disabled:opacity-50"
+  >
+    <RefreshCw
+      :size="14"
+      :class="{ 'animate-spin': loadingQueue }"
+    />
+
+    Refresh
+  </button>
+</div>
             <div class="overflow-x-auto">
               <table class="w-full text-[13px]">
                 <thead>
@@ -284,7 +457,7 @@ const donutGradient = computed(() => {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="q in queue" :key="q.no" class="border-t border-stone-200">
+                  <tr v-for="q in queue" :key="q.id" class="border-t border-stone-200">
                     <td class="px-5 py-3 font-medium whitespace-nowrap">{{ q.no }}</td>
                     <td class="px-5 py-3 whitespace-nowrap">{{ q.child }}</td>
                     <td class="px-5 py-3 whitespace-nowrap text-stone-500">{{ q.parent }}</td>

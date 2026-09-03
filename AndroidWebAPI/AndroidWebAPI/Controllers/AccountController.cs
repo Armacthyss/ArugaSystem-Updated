@@ -91,119 +91,125 @@ namespace AndroidWebAPI.Controllers
         // =========================================================
 
         [HttpPost("personnel")]
-        public async Task<IActionResult> CreatePersonnelAccount(
-            [FromBody] CreatePersonnelAccountDto dto)
+public async Task<IActionResult> CreatePersonnelAccount(
+    [FromBody] CreatePersonnelAccountDto dto)
+{
+    if (string.IsNullOrWhiteSpace(dto.FirstName))
+        return BadRequest(new { message = "First name is required." });
+
+    if (string.IsNullOrWhiteSpace(dto.LastName))
+        return BadRequest(new { message = "Last name is required." });
+
+    if (string.IsNullOrWhiteSpace(dto.Role))
+        return BadRequest(new { message = "Role is required." });
+
+    var validRoles = new[] { "Doctor", "Nurse", "Staff" };
+
+    if (!validRoles.Contains(dto.Role))
+    {
+        return BadRequest(new
         {
-            if (string.IsNullOrWhiteSpace(dto.FirstName))
-                return BadRequest(new { message = "First name is required." });
+            message = "Role must be Doctor, Nurse, or Staff."
+        });
+    }
 
-            if (string.IsNullOrWhiteSpace(dto.LastName))
-                return BadRequest(new { message = "Last name is required." });
+    // =========================================================
+    // GENERATE USERNAME AUTOMATICALLY
+    // =========================================================
 
-            if (string.IsNullOrWhiteSpace(dto.Username))
-                return BadRequest(new { message = "Username is required." });
+    string username = await GenerateUniqueUsernameAsync(
+        dto.FirstName,
+        dto.LastName
+    );
 
-            if (string.IsNullOrWhiteSpace(dto.Role))
-                return BadRequest(new { message = "Role is required." });
+    // Generate temporary password
+    string temporaryPassword = GenerateTemporaryPassword();
 
-            var validRoles = new[] { "Doctor", "Nurse", "Staff" };
+    string passwordHash =
+        BCrypt.Net.BCrypt.HashPassword(temporaryPassword);
 
-            if (!validRoles.Contains(dto.Role))
-            {
-                return BadRequest(new
-                {
-                    message = "Role must be Doctor, Nurse, or Staff."
-                });
-            }
+    // =========================================================
+    // 1. CREATE USER / PERSONNEL RECORD
+    // =========================================================
 
-            var existingAccount =
-                await _accountRepository.GetByUsernameAsync(dto.Username);
+    var user = new User
+    {
+        UserID = Guid.NewGuid(),
+        FirstName = dto.FirstName,
+        MiddleName = dto.MiddleName,
+        LastName = dto.LastName,
+        Username = username,
+        PasswordHash = passwordHash,
+        Email = dto.Email,
+        ContactNo = dto.ContactNo,
+        Address = dto.Address,
+        UserType = dto.Role == "Staff"
+        ? "Staff"
+        : "Healthcare",
+Position = dto.Role,
+        PRCNo = dto.LicenseNumber,
+        AccountStatus = "Active"
+    };
 
-            if (existingAccount != null)
-            {
-                return Conflict(new
-                {
-                    message = "Username is already in use."
-                });
-            }
+    _context.Users.Add(user);
 
-            // Generate temporary password
-            string temporaryPassword = GenerateTemporaryPassword();
+    await _context.SaveChangesAsync();
 
-            string passwordHash =
-                BCrypt.Net.BCrypt.HashPassword(temporaryPassword);
+    // =========================================================
+    // 2. CREATE ACCOUNT RECORD
+    // =========================================================
 
-            // ─────────────────────────────────────────────
-            // 1. CREATE USER / PERSONNEL RECORD
-            // ─────────────────────────────────────────────
+    var account = new Account
+    {
+        AccountID = Guid.NewGuid(),
+        Username = username,
+        PasswordHash = passwordHash,
+        AccountType = "Personnel",
+        ReferenceID = user.UserID,
+        Status = true,
+        MustChangePassword = true,
+        FailedLoginAttempts = 0,
+        LockedUntil = null,
+        LastLogin = null,
+        CreatedAt = DateTime.Now,
+        UpdatedAt = null
+    };
 
-            var user = new User
-            {
-                UserID = Guid.NewGuid(),
-                FirstName = dto.FirstName,
-                MiddleName = dto.MiddleName,
-                LastName = dto.LastName,
-                Username = dto.Username,
-                PasswordHash = passwordHash,
-                Email = dto.Email,
-                ContactNo = dto.ContactNo,
-                Address = dto.Address,
-                UserType = dto.Role,
-                PRCNo = dto.LicenseNumber,
-                AccountStatus = "Active"
-            };
+    await _accountRepository.CreateAsync(account);
 
-            _context.Users.Add(user);
+    // =========================================================
+    // RETURN GENERATED CREDENTIALS
+    // =========================================================
 
-            await _context.SaveChangesAsync();
+    return Ok(new
+    {
+        message = "Personnel account created successfully.",
 
-            // ─────────────────────────────────────────────
-            // 2. CREATE ACCOUNT RECORD
-            // ─────────────────────────────────────────────
+        account = new
+        {
+            account.AccountID,
+            account.Username,
+            account.AccountType,
+            account.ReferenceID,
 
-            var account = new Account
-            {
-                AccountID = Guid.NewGuid(),
-                Username = dto.Username,
-                PasswordHash = passwordHash,
-                AccountType = "Personnel",
-                ReferenceID = user.UserID,
-                Status = true,
-                MustChangePassword = true,
-                FailedLoginAttempts = 0,
-                LockedUntil = null,
-                LastLogin = null,
-                CreatedAt = DateTime.Now,
-                UpdatedAt = null
-            };
+            user.UserID,
+            user.FirstName,
+            user.MiddleName,
+            user.LastName,
+            user.UserType,
+            user.PRCNo,
+            user.ContactNo,
+            user.Email,
+            user.Address
+        },
 
-            await _accountRepository.CreateAsync(account);
+        temporaryPassword
+    });
+}
 
-            return Ok(new
-            {
-                message = "Personnel account created successfully.",
+         
 
-                account = new
-                {
-                    account.AccountID,
-                    account.Username,
-                    account.AccountType,
-                    account.ReferenceID,
-
-                    user.UserID,
-                    user.FirstName,
-                    user.MiddleName,
-                    user.LastName,
-                    user.UserType,
-                    user.PRCNo,
-                    user.ContactNo,
-                    user.Email,
-                    user.Address
-                },
-
-                temporaryPassword
-            });
-        }
+           
 
         // =========================================================
         // PATCH /api/accounts/{id}/status
@@ -261,6 +267,38 @@ namespace AndroidWebAPI.Controllers
                 temporaryPassword
             });
         }
+
+        private async Task<string> GenerateUniqueUsernameAsync(
+    string firstName,
+    string lastName)
+{
+    string first = NormalizeName(firstName);
+    string last = NormalizeName(lastName);
+
+    string baseUsername = $"{first}_{last}";
+
+    string username = baseUsername;
+    int counter = 1;
+
+    while (await _context.Accounts.AnyAsync(a => a.Username == username))
+    {
+        username = $"{baseUsername}{counter:00}";
+        counter++;
+    }
+
+    return username;
+}
+
+private static string NormalizeName(string name)
+{
+    return new string(
+        name
+            .Trim()
+            .ToLowerInvariant()
+            .Where(c => char.IsLetterOrDigit(c))
+            .ToArray()
+    );
+}
 
         private static string GenerateTemporaryPassword()
         {

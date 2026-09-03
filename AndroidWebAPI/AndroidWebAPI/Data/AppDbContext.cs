@@ -11,6 +11,10 @@ namespace AndroidWebAPI.Data
 
         public DbSet<Child> Children { get; set; }
         public DbSet<Parent> Parents { get; set; }
+        public DbSet<Queue> Queues { get; set; }
+public DbSet<QueueChild> QueueChildren { get; set; }
+        public DbSet<QueueQRSetting> QueueQRSettings { get; set; }
+        public DbSet<QueueQRCode> QueueQRCodes { get; set; }
         public DbSet<Account> Accounts { get; set; }
         public DbSet<AccountOtp> AccountOtps { get; set; }
         public DbSet<Notification> Notifications { get; set; }
@@ -30,6 +34,40 @@ namespace AndroidWebAPI.Data
 public DbSet<ClinicScheduleException> ClinicScheduleExceptions { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+modelBuilder.Entity<Queue>()
+    .HasKey(q => q.QueueID);
+
+modelBuilder.Entity<Queue>()
+    .HasOne(q => q.Parent)
+    .WithMany()
+    .HasForeignKey(q => q.ParentID)
+    .OnDelete(DeleteBehavior.Restrict);
+
+modelBuilder.Entity<QueueChild>()
+    .HasKey(qc => qc.QueueChildID);
+
+modelBuilder.Entity<QueueChild>()
+    .HasOne(qc => qc.Queue)
+    .WithMany(q => q.QueueChildren)
+    .HasForeignKey(qc => qc.QueueID)
+    .OnDelete(DeleteBehavior.Cascade);
+
+modelBuilder.Entity<QueueChild>()
+    .HasOne(qc => qc.Child)
+    .WithMany()
+    .HasForeignKey(qc => qc.ChildID)
+    .OnDelete(DeleteBehavior.Restrict);
+
+    modelBuilder.Entity<QueueQRSetting>()
+    .HasKey(s => s.SettingID);
+
+modelBuilder.Entity<QueueQRCode>()
+    .HasKey(qr => qr.QRCodeID);
+    
+    modelBuilder.Entity<QueueQRCode>()
+    .Property(qr => qr.QRDate)
+    .HasColumnType("date");
+
             modelBuilder.Entity<ChildParentRelationship>(entity =>
             {
                 entity.ToTable("ChildParentRelationship");

@@ -108,6 +108,7 @@ namespace AndroidWebAPI.Controllers
                         lastName = c.LastName,
                         birthDate = c.BirthDate,
                         placeOfBirth = c.PlaceOfBirth,
+                        allergies = c.Allergies,
                         sex = c.Sex,
                         healthCenter = c.HealthCenter,
                         barangay = c.Barangay,
@@ -148,6 +149,7 @@ public async Task<IActionResult> GetAllChildren()
             healthCenter = c.HealthCenter,
             barangay = c.Barangay,
             sex = c.Sex,
+            allergies = c.Allergies,
 
             parents = c.ParentRelationships.Select(r => new
             {
@@ -198,6 +200,7 @@ public async Task<IActionResult> GetChildById(Guid id)
             placeOfBirth = child.PlaceOfBirth,
             address = child.Address,
             healthCenter = child.HealthCenter,
+            allergies = child.Allergies,
             barangay = child.Barangay,
             sex = child.Sex,
 

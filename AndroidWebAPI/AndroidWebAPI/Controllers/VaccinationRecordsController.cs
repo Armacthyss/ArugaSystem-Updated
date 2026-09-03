@@ -92,5 +92,114 @@ public async Task<IActionResult> RecordHistoricalVaccinations(
         message = "Historical vaccination records saved successfully."
     });
 }
-    }
+    
+
+    // GET: api/VaccinationRecords/stats
+[HttpGet("stats")]
+public async Task<IActionResult> GetStats()
+{
+    var today = DateTime.Today;
+    var tomorrow = today.AddDays(1);
+    var weekStart = today.AddDays(-(int)today.DayOfWeek);
+
+    var allRecords = await _repository.GetAllAsync();
+
+    var vaccinatedToday = allRecords.Count(r =>
+        r.Status == "Completed" &&
+        r.VaccinationDate >= today &&
+        r.VaccinationDate < tomorrow);
+
+    var pendingToday = allRecords.Count(r =>
+        r.Status == "Pending" &&
+        r.VaccinationDate >= today &&
+        r.VaccinationDate < tomorrow);
+
+    var weeklyTotal = allRecords.Count(r =>
+        r.Status == "Completed" &&
+        r.VaccinationDate >= weekStart &&
+        r.VaccinationDate < tomorrow);
+
+    var missedTotal = allRecords.Count(r =>
+        r.Status == "Deferred" ||
+        r.Status == "Cancelled");
+
+    return Ok(new
+    {
+        vaccinatedToday,
+        pendingToday,
+        missedTotal,
+        weeklyTotal
+    });
 }
+
+
+// GET: api/VaccinationRecords/pending-today
+[HttpGet("pending-today")]
+public async Task<IActionResult> GetPendingToday()
+{
+    var today = DateTime.Today;
+    var tomorrow = today.AddDays(1);
+
+    var records = (await _repository.GetAllAsync())
+        .Where(r =>
+            r.Status == "Pending" &&
+            r.VaccinationDate >= today &&
+            r.VaccinationDate < tomorrow)
+        .Select(r => new
+        {
+            recordId = r.VaccinationRecordID,
+            childId = r.ChildID,
+
+            childName = r.Child != null
+                ? $"{r.Child.FirstName} {r.Child.LastName}".Trim()
+                : "Unknown",
+
+            vaccineId = r.VaccineID,
+
+            vaccineName = r.Vaccine != null
+                ? r.Vaccine.VaccineName
+                : "Unknown",
+
+            doseNumber = r.DoseNumber,
+            vaccinationDate = r.VaccinationDate,
+            status = r.Status
+        })
+        .ToList();
+
+    return Ok(records);
+}
+
+
+// GET: api/VaccinationRecords/completed-today
+[HttpGet("completed-today")]
+public async Task<IActionResult> GetCompletedToday()
+{
+    var today = DateTime.Today;
+    var tomorrow = today.AddDays(1);
+
+    var records = (await _repository.GetAllAsync())
+        .Where(r =>
+            r.Status == "Completed" &&
+            r.VaccinationDate >= today &&
+            r.VaccinationDate < tomorrow)
+        .OrderByDescending(r => r.VaccinationDate)
+        .Select(r => new
+        {
+            recordId = r.VaccinationRecordID,
+            childId = r.ChildID,
+
+            childName = r.Child != null
+                ? $"{r.Child.FirstName} {r.Child.LastName}".Trim()
+                : "Unknown",
+
+            vaccineName = r.Vaccine != null
+                ? r.Vaccine.VaccineName
+                : "Unknown",
+
+            doseNumber = r.DoseNumber,
+            vaccinationDate = r.VaccinationDate
+        })
+        .ToList();
+
+    return Ok(records);
+}}}

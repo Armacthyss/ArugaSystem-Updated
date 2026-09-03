@@ -473,67 +473,133 @@ namespace AndroidWebAPI.Controllers
             // 7. PERSONNEL ACCOUNT
             // =====================================================
 
-            if (account.AccountType == "Personnel")
-            {
-                var user = await _context.Users
-                    .FirstOrDefaultAsync(u =>
-                        u.UserID == account.ReferenceID);
+   // =====================================================
+// 7. PERSONNEL ACCOUNT
+// =====================================================
 
-                if (user == null)
-                {
-                    return Unauthorized(new
-                    {
-                        message = "Personnel profile not found."
-                    });
-                }
+if (account.AccountType == "Personnel")
+{
+    var user = await _context.Users
+        .FirstOrDefaultAsync(u =>
+            u.UserID == account.ReferenceID);
 
-                var token = GenerateJwtToken(
-                    account,
-                    user.UserID,
-                    user.Email,
-                    user.UserType
-                );
+    if (user == null)
+    {
+        return Unauthorized(new
+        {
+            message = "Personnel profile not found."
+        });
+    }
 
-                return Ok(new
-                {
-                    token,
+    // UserType is "Healthcare" for all personnel records.
+    // Position determines whether this is Staff or Healthcare.
+    string role;
 
-                    accountID = account.AccountID,
+    if (string.Equals(
+        user.Position,
+        "Staff",
+        StringComparison.OrdinalIgnoreCase))
+    {
+        role = "Staff";
+    }
+    else
+    {
+        // Doctor / Nurse / other healthcare positions
+        role = "Healthcare";
+    }
 
-                    referenceID = account.ReferenceID,
+    var token = GenerateJwtToken(
+        account,
+        user.UserID,
+        user.Email,
+        role
+    );
 
-                    accountType = account.AccountType,
+    return Ok(new
+    {
+        token,
 
-                    role = user.UserType,
+        accountID = account.AccountID,
 
-                    user = new
-                    {
-                        userID = user.UserID,
-                        firstName = user.FirstName,
-                        middleName = user.MiddleName,
-                        lastName = user.LastName,
-                        username = user.Username,
-                        email = user.Email,
-                        contactNo = user.ContactNo,
-                        prcNo = user.PRCNo,
-                        accountStatus = user.AccountStatus
-                    },
+        referenceID = account.ReferenceID,
 
-                    mustChangePassword =
-                        account.MustChangePassword,
+        accountType = account.AccountType,
 
-                    temporaryPasswordExpiresAt =
-                        (DateTime?)null,
+        role = role,
 
-                    lastLogin = account.LastLogin
-                });
-            }
+        user = new
+        {
+            userID = user.UserID,
+            firstName = user.FirstName,
+            middleName = user.MiddleName,
+            lastName = user.LastName,
+            username = user.Username,
+            email = user.Email,
+            contactNo = user.ContactNo,
+            prcNo = user.PRCNo,
+            accountStatus = user.AccountStatus,
+
+            userType = user.UserType,
+            position = user.Position
+        },
+
+        mustChangePassword =
+            account.MustChangePassword,
+
+        temporaryPasswordExpiresAt =
+            (DateTime?)null,
+
+        lastLogin = account.LastLogin
+    });
+}
+
+ // =====================================================
+// 8. SYSTEM ADMIN ACCOUNT
+// =====================================================
+
+if (account.AccountType == "SystemAdmin")
+{
+    var token = GenerateJwtToken(
+        account,
+        account.ReferenceID,
+        null,
+        "SystemAdmin"
+    );
+
+    return Ok(new
+    {
+        token,
+
+        accountID = account.AccountID,
+
+        referenceID = account.ReferenceID,
+
+        accountType = account.AccountType,
+
+        role = "SystemAdmin",
+
+        user = new
+        {
+            username = account.Username
+        },
+
+        mustChangePassword =
+            account.MustChangePassword,
+
+        temporaryPasswordExpiresAt =
+            (DateTime?)null,
+
+        lastLogin = account.LastLogin
+    });
+}
 
             return Unauthorized(new
             {
                 message = "Unsupported account type."
             });
         }
+
+        
 
         // =========================================================
         // JWT

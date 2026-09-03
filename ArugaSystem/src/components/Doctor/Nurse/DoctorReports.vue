@@ -169,7 +169,7 @@ const route  = useRoute()
 const doctor = ref({ userId: '', fullName: '', userType: '' })
 onMounted(() => {
   const stored = localStorage.getItem('aruga_user')
-  if (!stored) { router.push('/login'); return }
+  if (!stored) { router.push('/'); return }
   const u = JSON.parse(stored)
   doctor.value = { userId: u.UserID, fullName: `${u.FirstName} ${u.LastName}`, userType: u.UserType }
 })
@@ -246,6 +246,6 @@ function initials(name) {
 function logout() {
   localStorage.removeItem('aruga_user')
   localStorage.removeItem('aruga_token')
-  router.push('/login')
+  router.push('/')
 }
 </script>

@@ -1,33 +1,9 @@
 <script setup>
-/*
-  Pediatric Vaccination — Operating Hours
-  ----------------------------------------
-  Manages:
-    1. Weekly Operating Schedule  (GET/PUT /api/ClinicOperatingSchedule)
-    2. Schedule Exceptions        (GET/POST/PUT/DELETE /api/ClinicScheduleExceptions)
 
-  The sidebar/header shell below is copied as-is from the existing
-  Vaccine Management page so the app keeps one consistent layout — only
-  `navItems`/`activeNav` gained an "Operating Hours" entry and the
-  header title/breadcrumb changed. If the shell already lives in a
-  shared layout component in the real project, delete the <aside> and
-  <header> blocks here and drop this file's <section> content into
-  that layout's <router-view> instead — don't run two copies of the
-  sidebar.
-
-  Wiring notes:
-  - Swap the `scheduleApi` / `exceptionsApi` constants for the
-    project's existing API client if one exists, instead of calling
-    axios directly.
-  - `userRole` drives which controls are shown. Wire it to whatever
-    auth/role source the app already uses instead of the default prop.
-  - The backend is still the source of truth for authorization — this
-    component only hides admin controls in the UI; every mutating call
-    goes through the normal authenticated API, which rejects
-    non-admins server-side too.
-*/
 import axios from "axios"
 import { ref, computed, onMounted } from "vue"
+import AppSidebar from "./Components/AppSidebar.vue"
+import AppHeader from "./Components/AppHeader.vue"
 
 const props = defineProps({
   // "Admin" | "Staff" | "Parent" (Parent should never be routed here)
@@ -496,76 +472,15 @@ onMounted(() => {
 <template>
   <div class="min-h-screen bg-slate-50 flex text-slate-900">
     <!-- ============================ SIDEBAR ============================ -->
-    <aside
-      :class="[isCollapsed ? 'w-20' : 'w-65']"
-      class="hidden md:flex flex-col shrink-0 sticky top-0 h-screen bg-white border-r border-slate-200 transition-all duration-300 ease-in-out"
-    >
-      <div class="h-[70px] flex items-center gap-3 px-5 border-b border-slate-200 shrink-0">
-        <div class="w-9 h-9 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
-          <span class="text-white font-bold text-sm">A</span>
-        </div>
-        <span v-if="!isCollapsed" class="font-bold text-slate-900 tracking-tight whitespace-nowrap overflow-hidden">Aruga</span>
-      </div>
-
-      <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-        <button
-          v-for="item in navItems"
-          :key="item.label"
-          @click="activeNav = item.label"
-          :class="[
-            activeNav === item.label ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900',
-          ]"
-          class="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-        >
-          <span class="text-base shrink-0" aria-hidden="true">{{ item.icon }}</span>
-          <span v-if="!isCollapsed" class="truncate">{{ item.label }}</span>
-        </button>
-      </nav>
-
-      <div class="border-t border-slate-200 p-3 shrink-0 space-y-2">
-        <div class="flex items-center gap-3 px-2 py-2">
-          <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">RM</div>
-          <div v-if="!isCollapsed" class="min-w-0">
-            <p class="text-sm font-semibold text-slate-900 truncate">Renzo Miguel</p>
-            <p class="text-xs text-slate-500 truncate">System Admin</p>
-          </div>
-        </div>
-        <button class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400">
-          <span class="text-base shrink-0" aria-hidden="true">🚪</span>
-          <span v-if="!isCollapsed">Log out</span>
-        </button>
-        <button @click="toggleSidebar" class="w-full flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors">
-          <span :class="isCollapsed ? 'rotate-180' : ''" class="transition-transform inline-block">◀</span>
-        </button>
-      </div>
-    </aside>
-
+    <AppSidebar/>
     <!-- ============================ MAIN ============================ -->
     <div class="flex-1 min-w-0 flex flex-col">
       <!-- Top navbar -->
-      <header class="h-[70px] sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-6 gap-4">
-        <div class="min-w-0">
-          <h1 class="text-lg font-bold text-slate-900 truncate">Operating Hours</h1>
-          <p class="text-xs text-slate-500 truncate">Dashboard / Operating Hours</p>
-        </div>
-        <div class="flex items-center gap-3 shrink-0">
-          <span
-            v-if="!isAdmin"
-            class="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium px-3 py-1.5"
-          >
-            <span aria-hidden="true">👁️</span> View-only
-          </span>
-          <button class="relative w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-            <span aria-hidden="true">🔔</span>
-            <span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white"></span>
-          </button>
-          <button class="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-            <span aria-hidden="true">⚙️</span>
-          </button>
-          <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">RM</div>
-        </div>
-      </header>
-
+      <AppHeader
+  title="Operating Hours"
+  breadcrumb="System Administration / Operating Hours"
+  user-initials="RM"
+/>
       <!-- Page content -->
       <main class="flex-1 p-6 space-y-6">
         <!-- Inline notification -->

@@ -33,21 +33,15 @@ const canSubmit = computed(() =>
 function redirectForRole(role) {
   switch (role) {
     case "Parent":
-      router.push("/Dashboard")
+      router.push("/ParentOverview")
       break
 
-    // Doctor and Nurse share the same homepage in the current router.
-    case "Doctor":
-    case "Nurse":
-      router.push({ name: "DoctorHome" })
+    case "Healthcare":
+      router.push("/healthcare/home")
       break
 
     case "Staff":
       router.push("/staff/dashboard")
-      break
-
-    case "Admin":
-      router.push("/AdminHome")
       break
 
     case "SystemAdmin":
@@ -60,8 +54,6 @@ function redirectForRole(role) {
       break
   }
 }
-
-
 // =====================================================
 // LOGIN
 // =====================================================
@@ -124,8 +116,7 @@ async function handleLogin() {
       class="hidden lg:flex lg:w-1/2 relative bg-cover bg-center"
       style="background-image: url('https://images.unsplash.com/photo-1584515933487-779824d29309');"
     >
-      <div class="absolute inset-0 bg-linear-to-brom-green-900/80 via-green-800/75 to-green-700/85"></div>
-
+      <div class="absolute inset-0 bg-gradient-to-b from-green-900/80 via-green-800/75 to-green-700/85"></div>
       <div class="relative z-10 h-full w-full flex flex-col justify-between p-12 text-white">
         <div>
           <h1 class="text-3xl font-black tracking-wide">ARUGA</h1>

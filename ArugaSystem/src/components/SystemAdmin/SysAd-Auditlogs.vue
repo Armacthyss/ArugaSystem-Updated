@@ -1,22 +1,13 @@
 <script setup>
 import { ref, computed, reactive } from 'vue'
+import AppSidebar from './Components/AppSidebar.vue'
+import AppHeader from './Components/AppHeader.vue'
 
 /* ----------------------------- Sidebar state ------------------------------ */
 const isCollapsed = ref(false)
 const toggleSidebar = () => (isCollapsed.value = !isCollapsed.value)
 
-const navItems = [
-  { label: 'Dashboard', icon: '🏠' },
-  { label: 'User Management', icon: '👥' },
-  { label: 'Patient Management', icon: '🧒' },
-  { label: 'Vaccine Management', icon: '💉' },
-  { label: 'Inventory', icon: '📦' },
-  { label: 'Notifications', icon: '🔔' },
-  { label: 'Reports', icon: '📊' },
-  { label: 'Audit Logs', icon: '📋' },
-  { label: 'Settings', icon: '⚙️' },
-]
-const activeNav = ref('Audit Logs')
+
 
 /* -------------------------------- Status meta -------------------------------- */
 const statusMeta = {
@@ -151,72 +142,16 @@ const timeline = computed(() => logs.value.slice(0, 6))
 <template>
   <div class="min-h-screen bg-slate-50 flex text-slate-900">
     <!-- ============================ SIDEBAR ============================ -->
-    <aside
-      :class="[isCollapsed ? 'w-20' : 'w-[260px]']"
-      class="hidden md:flex flex-col shrink-0 sticky top-0 h-screen bg-white border-r border-slate-200 transition-all duration-300 ease-in-out"
-    >
-      <div class="h-[70px] flex items-center gap-3 px-5 border-b border-slate-200 shrink-0">
-        <div class="w-9 h-9 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
-          <span class="text-white font-bold text-sm">A</span>
-        </div>
-        <span v-if="!isCollapsed" class="font-bold text-slate-900 tracking-tight whitespace-nowrap overflow-hidden">Aruga</span>
-      </div>
-
-      <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-        <button
-          v-for="item in navItems"
-          :key="item.label"
-          @click="activeNav = item.label"
-          :class="[
-            activeNav === item.label ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900',
-          ]"
-          class="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-        >
-          <span class="text-base shrink-0" aria-hidden="true">{{ item.icon }}</span>
-          <span v-if="!isCollapsed" class="truncate">{{ item.label }}</span>
-        </button>
-      </nav>
-
-      <div class="border-t border-slate-200 p-3 shrink-0 space-y-2">
-        <div class="flex items-center gap-3 px-2 py-2">
-          <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">RM</div>
-          <div v-if="!isCollapsed" class="min-w-0">
-            <p class="text-sm font-semibold text-slate-900 truncate">Renzo Miguel</p>
-            <p class="text-xs text-slate-500 truncate">System Admin</p>
-          </div>
-        </div>
-        <button class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400">
-          <span class="text-base shrink-0" aria-hidden="true">🚪</span>
-          <span v-if="!isCollapsed">Log out</span>
-        </button>
-        <button @click="toggleSidebar" class="w-full flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors">
-          <span :class="isCollapsed ? 'rotate-180' : ''" class="transition-transform inline-block">◀</span>
-        </button>
-      </div>
-    </aside>
+    <AppSidebar/>
 
     <!-- ============================ MAIN ============================ -->
     <div class="flex-1 min-w-0 flex flex-col">
       <!-- Top navbar -->
-      <header class="h-[70px] sticky top-0 z-20 bg-white border-b border-slate-200 flex items-center justify-between px-6 gap-4">
-        <div class="min-w-0">
-          <h1 class="text-lg font-bold text-slate-900 truncate">Audit Logs</h1>
-          <p class="text-xs text-slate-500 truncate">Dashboard / Audit Logs</p>
-        </div>
-        <div class="flex items-center gap-3 shrink-0">
-          <span class="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-slate-100 text-slate-500">
-            <span aria-hidden="true">🔒</span> Read-only
-          </span>
-          <button class="relative w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-            <span aria-hidden="true">🔔</span>
-            <span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white"></span>
-          </button>
-          <button class="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-            <span aria-hidden="true">⚙️</span>
-          </button>
-          <div class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold shrink-0">RM</div>
-        </div>
-      </header>
+      <AppHeader
+  title="Audit Logs"
+  breadcrumb="System Administration / Audit Logs"
+  user-initials="RM"
+/>
 
       <!-- Content -->
       <main class="p-6 space-y-6">

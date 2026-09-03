@@ -32,15 +32,15 @@ namespace AndroidWebAPI.Data
                 .Include(t => t.Vaccine)
                 .FirstOrDefaultAsync(t => t.TimelineID == timelineId);
         }
-
-        public async Task<IEnumerable<VaccinationTimeline>> GetByChildAsync(Guid childId)
-        {
-            return await _context.VaccinationTimelines
-                .Where(t => t.ChildID == childId)
-                .OrderBy(t => t.ExpectedDate)
-                .ToListAsync();
-        }
-
+public async Task<IEnumerable<VaccinationTimeline>> GetByChildAsync(Guid childId)
+{
+    return await _context.VaccinationTimelines
+        .Where(t => t.ChildID == childId)
+        .Include(t => t.Child)
+        .Include(t => t.Vaccine)
+        .OrderBy(t => t.ExpectedDate)
+        .ToListAsync();
+}
         public async Task AddAsync(VaccinationTimeline timeline)
         {
             await _context.VaccinationTimelines.AddAsync(timeline);
