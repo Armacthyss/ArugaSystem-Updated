@@ -19,6 +19,7 @@ public DbSet<QueueChild> QueueChildren { get; set; }
         public DbSet<AccountOtp> AccountOtps { get; set; }
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<User> Users { get; set; }
+
         public DbSet<VaccinationRecord> VaccinationRecords { get; set; }
         public DbSet<VaccinationTimeline> VaccinationTimelines { get; set; }
 
@@ -29,11 +30,21 @@ public DbSet<QueueChild> QueueChildren { get; set; }
         
         public DbSet<ChildParentRelationship> ChildParentRelationships { get; set; }
      public DbSet<ClinicOperatingSchedule> ClinicOperatingSchedules { get; set; }
-
-     
+public DbSet<NotificationSetting> NotificationSettings { get; set; }
+     public DbSet<NotificationRule> NotificationRules { get; set; }
 public DbSet<ClinicScheduleException> ClinicScheduleExceptions { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+
+            modelBuilder.Entity<User>()
+    .Property(u => u.AvailabilityStatus)
+    .HasMaxLength(20)
+    .HasDefaultValue("Offline");
+    
+            modelBuilder.Entity<Queue>().HasKey(q => q.QueueID);
+modelBuilder.Entity<Queue>()
+    .Property(q => q.QueueDate)
+    .HasColumnType("date");
 modelBuilder.Entity<Queue>()
     .HasKey(q => q.QueueID);
 
@@ -43,6 +54,17 @@ modelBuilder.Entity<Queue>()
     .HasForeignKey(q => q.ParentID)
     .OnDelete(DeleteBehavior.Restrict);
 
+    modelBuilder.Entity<Queue>()
+    .HasIndex(q => new { q.QueueDate, q.QueueNumber })
+    .IsUnique();
+
+
+    modelBuilder.Entity<Queue>()
+    .ToTable("Queues", t =>
+        t.HasCheckConstraint(
+            "CK_Queues_QueueNumber_Range",
+            "[QueueNumber] >= 1 AND [QueueNumber] <= 999"
+        ));
 modelBuilder.Entity<QueueChild>()
     .HasKey(qc => qc.QueueChildID);
 

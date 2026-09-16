@@ -26,5 +26,7 @@ namespace AndroidWebAPI.Models
 public string Position { get; set; } = string.Empty;
         public string? PRCNo { get; set; }
         public string AccountStatus { get; set; } = "Active";
+
+        public string AvailabilityStatus { get; set; } = "Offline";
     }
 }

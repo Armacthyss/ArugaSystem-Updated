@@ -112,8 +112,11 @@ import HealthcareHeader from '@/components/Healthcare/Components/HealthcareHeade
 
 const router = useRouter()
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:57147/api'
+const API_ROOT = (
+  import.meta.env.VITE_API_URL || 'http://localhost:57147'
+).replace(/\/api\/?$/, '').replace(/\/$/, '')
 
+const API_BASE = `${API_ROOT}/api`
 function authHeaders(json = false) {
   const h = { Authorization: `Bearer ${localStorage.getItem('aruga_token')}` }
   if (json) h['Content-Type'] = 'application/json'
@@ -177,7 +180,7 @@ async function fetchQueue() {
   loadingQueue.value = true
   loadError.value = ''
   try {
-    const res = await fetch(`${API_BASE}/Queue`, { headers: authHeaders() })
+   const res = await fetch(`${API_BASE}/Queue/today`, { headers: authHeaders() })
     if (!res.ok) throw new Error(`Queue request failed (${res.status})`)
     const data = await res.json()
     rawQueue.value = data.filter(q => isToday(q.queueDate ?? q.QueueDate))

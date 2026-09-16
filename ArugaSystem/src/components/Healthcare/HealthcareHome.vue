@@ -180,7 +180,11 @@ const router = useRouter()
 
 // VITE_API_URL is the bare host (no /api) per the project's existing
 // convention — /api is appended here, not stored in the env var.
-const API_BASE = `${(import.meta.env.VITE_API_URL || 'http://localhost:57147').replace(/\/$/, '')}/api`
+const API_ROOT = (
+  import.meta.env.VITE_API_URL || 'http://localhost:57147'
+).replace(/\/api\/?$/, '').replace(/\/$/, '')
+
+const API_BASE = `${API_ROOT}/api`
 
 function authHeaders() {
   return { Authorization: `Bearer ${localStorage.getItem('aruga_token')}` }
@@ -248,11 +252,19 @@ function isToday(dateStr) {
 async function fetchQueue() {
   loadingQueue.value = true
   loadError.value = ''
+
   try {
-    const res = await fetch(`${API_BASE}/Queue`, { headers: authHeaders() })
-    if (!res.ok) throw new Error(`Queue request failed (${res.status})`)
+    const res = await fetch(`${API_BASE}/Queue/today`, {
+      headers: authHeaders()
+    })
+
+    if (!res.ok) {
+      throw new Error(`Queue request failed (${res.status})`)
+    }
+
     const data = await res.json()
-    allQueues.value = data.filter(q => isToday(q.queueDate ?? q.QueueDate))
+
+    allQueues.value = data
   } catch (e) {
     console.error('fetchQueue:', e)
     loadError.value = 'Could not load today\'s queue. Please refresh.'

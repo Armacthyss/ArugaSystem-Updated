@@ -97,7 +97,7 @@ import ChildSidebar from '../Components/Childsidebar.vue'
 import ProfileModal from '../Components/Profilemodal.vue'
 import NotificationPanel from '../Components/Notificationpanel.vue'
 
-import { getAccount } from '@/utils/auth'
+import { getAccount, logout } from '@/utils/auth'
 import api from '../Composables/api.js'
 
 const router = useRouter()
@@ -244,7 +244,7 @@ const upcomingDoses = computed(() => {
 // =====================================================
 
 function loadParentSession() {
-  const savedAccount = getCurrentParent()
+  const savedAccount = getAccount()
 
   if (!savedAccount) {
     router.push('/')
@@ -253,7 +253,6 @@ function loadParentSession() {
 
   account.value = savedAccount
 
-  // Support both possible backend response structures
   parentData.value =
     savedAccount.user ?? savedAccount
 

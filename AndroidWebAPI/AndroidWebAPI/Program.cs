@@ -9,10 +9,6 @@ using AndroidWebAPI.Repositories;
 using AndroidWebAPI.Services;
 var builder = WebApplication.CreateBuilder(args);
 
-var hash = BCrypt.Net.BCrypt.HashPassword("Admin12345");
-Console.WriteLine("ADMIN HASH:");
-Console.WriteLine(hash);
-
 
 // ── Ports ────────────────────────────────────────────────────
 builder.WebHost.UseUrls(
@@ -59,7 +55,8 @@ builder.Services.AddScoped<IQueueQRSettingRepository, QueueQRSettingRepository>(
 builder.Services.AddScoped<IQueueQRCodeRepository, QueueQRCodeRepository>();
 builder.Services.AddScoped<IQueueQRCodeRepository, QueueQRCodeRepository>();
 builder.Services.AddScoped<IClinicOperatingScheduleRepository, ClinicOperatingScheduleRepository>();
-
+builder.Services.AddScoped<INotificationSettingRepository, NotificationSettingRepository>();
+builder.Services.AddScoped<INotificationRuleRepository, NotificationRuleRepository>();
 builder.Services.AddScoped<
     IChildParentRelationshipRepository,
     ChildParentRelationshipRepository>();

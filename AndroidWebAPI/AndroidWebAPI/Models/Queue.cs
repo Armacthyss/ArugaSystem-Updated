@@ -21,7 +21,27 @@ namespace AndroidWebAPI.Models
 
         public DateTime? UpdatedAt { get; set; }
 
-        // Navigation Property
+
+        // ============================================
+        // HEALTHCARE WORKER ASSIGNMENT
+        // ============================================
+
+        public Guid? AssignedWorkerID { get; set; }
+
+        [ForeignKey(nameof(AssignedWorkerID))]
+        public virtual User? AssignedWorker { get; set; }
+
+        public string AssignmentStatus { get; set; } = "Unassigned";
+
+        public DateTime? AssignedAt { get; set; }
+
+        public DateTime? AssignmentRespondedAt { get; set; }
+
+
+        // ============================================
+        // NAVIGATION
+        // ============================================
+
         [ForeignKey(nameof(ParentID))]
         public virtual Parent? Parent { get; set; }
 

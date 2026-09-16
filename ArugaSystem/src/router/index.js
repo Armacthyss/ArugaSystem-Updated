@@ -54,6 +54,7 @@ import SystemOperatingHours from '@/components/SystemAdmin/SysAd-Operating_hours
 import StaffDashboard from '@/components/Staff/StaffDashboard.vue'
 import StaffPatientRecords from '@/components/Staff/StaffPatientRecords.vue'
 import StaffVaccineSchedule from '@/components/Staff/StaffVaccineSchedule.vue'
+import StaffQueueManagement from '@/components/Staff/StaffQueueManagement.vue'
 
 // ── Healthcare ──────────────────────────────────────────────
 
@@ -235,6 +236,15 @@ const routes = [
   component: StaffPatientRecords,
   meta: {
     requiresAuth: false
+  }
+},
+
+ {
+  path: '/staff/queue-management',
+  component: StaffQueueManagement,
+  meta: {
+    requiresAuth: true,
+    role: 'Staff'
   }
 },
 

@@ -1,5 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from "vue";
+import StaffHeader from "./Components/StaffHeader.vue";
+import StaffSidebar from "./Components/StaffSidebar.vue";
 import {
   Home, Users, Syringe, Package, Bell, BarChart2, FileText, Settings,
   LogOut, Search, QrCode, UserPlus, CalendarDays, ChevronLeft, ChevronRight,
@@ -301,77 +303,11 @@ onUnmounted(() => {
 <template>
   <div class="flex min-h-screen w-full bg-stone-50 text-stone-900" style="font-family: 'Inter','Segoe UI',sans-serif;">
     <!-- ---------------- Sidebar ---------------- -->
-    <aside
-      class="flex flex-col shrink-0 border-r border-stone-200 bg-white transition-all duration-200"
-      :class="collapsed ? 'w-19' : 'w-66'"
-    >
-      <div class="flex items-center gap-3 px-5 py-5 border-b border-stone-200">
-        <div class="flex h-9 w-9 items-center justify-center rounded-xl text-white font-bold text-sm shrink-0 bg-linear-to-br from-emerald-600 to-emerald-800">
-          A
-        </div>
-        <div v-if="!collapsed" class="leading-tight">
-          <p class="font-semibold text-[15px]">Aruga Pediatric System</p>
-          <p class="text-[11px] text-stone-500">Staff Portal</p>
-        </div>
-      </div>
-
-      <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        <button
-          v-for="item in navItems"
-          :key="item.label"
-          class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13.5px] font-medium transition-colors"
-          :class="item.active ? 'bg-emerald-50 text-emerald-800' : 'text-stone-500 hover:bg-stone-50'"
-        >
-          <component :is="item.icon" :size="18" :stroke-width="2" />
-          <span v-if="!collapsed">{{ item.label }}</span>
-        </button>
-      </nav>
-
-      <div class="border-t border-stone-200 px-3 py-4">
-        <div class="flex items-center gap-3 rounded-xl px-2 py-2">
-          <div class="flex h-9 w-9 items-center justify-center rounded-full text-white text-xs font-semibold shrink-0 bg-sky-700">
-            MP
-          </div>
-          <div v-if="!collapsed" class="leading-tight">
-            <p class="text-[13px] font-semibold">Marielle Pascual</p>
-            <p class="text-[11px] text-stone-500">Clinic Staff</p>
-          </div>
-        </div>
-        <button class="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium text-rose-700 hover:bg-rose-50">
-          <LogOut :size="17" />
-          <span v-if="!collapsed">Log out</span>
-        </button>
-      </div>
-
-      <button
-        @click="collapsed = !collapsed"
-        class="mx-auto mb-3 flex h-7 w-7 items-center justify-center rounded-full border border-stone-200 text-stone-500"
-      >
-        <component :is="collapsed ? ChevronRight : ChevronLeft" :size="14" />
-      </button>
-    </aside>
-
+   <StaffSidebar/>
     <!-- ---------------- Main ---------------- -->
     <main class="flex-1 min-w-0">
       <!-- Top bar -->
-      <header class="flex items-center justify-between px-8 py-5 border-b border-stone-200 bg-white">
-        <div>
-          <h1 class="text-[22px] font-bold">Staff Dashboard</h1>
-          <p class="text-[12.5px] mt-0.5 text-stone-500">Aruga / Dashboard</p>
-        </div>
-        <div class="flex items-center gap-3">
-          <button class="relative flex h-9 w-9 items-center justify-center rounded-full bg-stone-50">
-            <Bell :size="17" class="text-stone-500" />
-            <span class="absolute top-1.5 right-2 h-1.5 w-1.5 rounded-full bg-rose-600" />
-          </button>
-          <button class="flex h-9 w-9 items-center justify-center rounded-full bg-stone-50">
-            <Settings :size="17" class="text-stone-500" />
-          </button>
-          <div class="flex h-9 w-9 items-center justify-center rounded-full text-white text-xs font-semibold bg-emerald-700">
-            MP
-          </div>
-        </div>
-      </header>
+      <StaffHeader/>
 
       <div class="px-8 py-6 space-y-6">
         <!-- Summary cards -->

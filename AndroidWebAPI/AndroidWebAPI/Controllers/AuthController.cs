@@ -490,6 +490,13 @@ if (account.AccountType == "Personnel")
             message = "Personnel profile not found."
         });
     }
+user.AvailabilityStatus = "Online";
+
+await _context.SaveChangesAsync();
+
+Console.WriteLine(
+    $"LOGIN STATUS UPDATE: {user.FirstName} {user.LastName} -> {user.AvailabilityStatus}"
+);
 
     // UserType is "Healthcare" for all personnel records.
     // Position determines whether this is Staff or Healthcare.
@@ -688,6 +695,54 @@ if (account.AccountType == "SystemAdmin")
                 Encoding.UTF8.GetBytes(jwtKey)
             );
         }
+        // =========================================================
+// LOGOUT
+// POST /api/auth/logout
+// =========================================================
+
+[HttpPost("logout")]
+[Authorize]
+public async Task<IActionResult> Logout()
+{
+    var referenceIdClaim = User.FindFirst("ReferenceID")?.Value;
+
+    if (string.IsNullOrWhiteSpace(referenceIdClaim))
+    {
+        return Unauthorized(new
+        {
+            message = "User identity could not be determined."
+        });
+    }
+
+    if (!Guid.TryParse(referenceIdClaim, out Guid userID))
+    {
+        return Unauthorized(new
+        {
+            message = "Invalid user identity."
+        });
+    }
+
+    var user = await _context.Users
+        .FirstOrDefaultAsync(u => u.UserID == userID);
+
+    if (user == null)
+    {
+        return NotFound(new
+        {
+            message = "User not found."
+        });
+    }
+
+    user.AvailabilityStatus = "Offline";
+
+    await _context.SaveChangesAsync();
+
+    return Ok(new
+    {
+        message = "Logged out successfully.",
+        availabilityStatus = user.AvailabilityStatus
+    });
+}
     }
 
     // =============================================================

@@ -17,6 +17,7 @@ namespace AndroidWebAPI.Repositories
         {
             return await _context.Queues
                 .Include(q => q.Parent)
+                .Include(q => q.AssignedWorker)
                 .Include(q => q.QueueChildren)
                     .ThenInclude(qc => qc.Child)
                 .OrderBy(q => q.QueueDate)
@@ -28,33 +29,53 @@ namespace AndroidWebAPI.Repositories
         {
             return await _context.Queues
                 .Include(q => q.Parent)
+                .Include(q => q.AssignedWorker)
                 .Include(q => q.QueueChildren)
                     .ThenInclude(qc => qc.Child)
                 .FirstOrDefaultAsync(q => q.QueueID == queueId);
         }
 
-        public async Task<Queue?> GetParentQueueAsync(
-            Guid parentId,
-            DateTime queueDate)
-        {
-            return await _context.Queues
-                .Include(q => q.Parent)
-                .Include(q => q.QueueChildren)
-                    .ThenInclude(qc => qc.Child)
-                .FirstOrDefaultAsync(q =>
-                    q.ParentID == parentId &&
-                    q.QueueDate.Date == queueDate.Date);
-        }
+public async Task<Queue?> GetParentQueueAsync(
+    Guid parentId,
+    DateTime queueDate)
+{
+    var date = queueDate.Date;
 
-        public async Task<int> GetNextQueueNumberAsync(DateTime queueDate)
-        {
-            var lastQueueNumber = await _context.Queues
-                .Where(q => q.QueueDate.Date == queueDate.Date)
-                .Select(q => (int?)q.QueueNumber)
-                .MaxAsync();
+    return await _context.Queues
+        .Include(q => q.Parent)
+        .Include(q => q.AssignedWorker)
+        .Include(q => q.QueueChildren)
+            .ThenInclude(qc => qc.Child)
+        .FirstOrDefaultAsync(q =>
+            q.ParentID == parentId &&
+            q.QueueDate == date);
+}
 
-            return (lastQueueNumber ?? 0) + 1;
-        }
+public async Task<int> GetNextQueueNumberAsync(DateTime queueDate)
+{
+    var date = queueDate.Date;
+
+    var lastQueueNumber = await _context.Queues
+        .Where(q => q.QueueDate == date)
+        .Select(q => (int?)q.QueueNumber)
+        .MaxAsync();
+
+    return (lastQueueNumber ?? 0) + 1;
+}
+
+public async Task<List<Queue>> GetTodayQueuesAsync()
+{
+    var today = DateTime.Today;
+
+    return await _context.Queues
+        .Include(q => q.Parent)
+        .Include(q => q.AssignedWorker)
+        .Include(q => q.QueueChildren)
+            .ThenInclude(qc => qc.Child)
+        .Where(q => q.QueueDate == today)
+        .OrderBy(q => q.QueueNumber)
+        .ToListAsync();
+}
 
         public async Task<Queue> CreateAsync(Queue queue)
         {
@@ -81,5 +102,17 @@ namespace AndroidWebAPI.Repositories
             _context.Queues.Remove(queue);
             await _context.SaveChangesAsync();
         }
+
+        public async Task<ClinicOperatingSchedule?> GetTodayOperatingScheduleAsync(
+    DateTime date)
+{
+    int dayOfWeek = (int)date.DayOfWeek;
+
+    return await _context.ClinicOperatingSchedules
+        .FirstOrDefaultAsync(s =>
+            s.DayOfWeek == dayOfWeek &&
+            s.IsOpen &&
+            s.IsActive);
+}
     }
 }

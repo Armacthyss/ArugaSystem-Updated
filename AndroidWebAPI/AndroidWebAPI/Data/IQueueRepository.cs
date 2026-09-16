@@ -7,9 +7,9 @@ namespace AndroidWebAPI.Repositories
         Task<List<Queue>> GetAllAsync();
         Task<Queue?> GetByIdAsync(Guid queueId);
         Task<Queue?> GetParentQueueAsync(Guid parentId, DateTime queueDate);
-
+Task<ClinicOperatingSchedule?> GetTodayOperatingScheduleAsync(DateTime date);
         Task<Queue> CreateAsync(Queue queue);
-
+Task<List<Queue>> GetTodayQueuesAsync();
         Task UpdateAsync(Queue queue);
         Task DeleteAsync(Guid queueId);
 
